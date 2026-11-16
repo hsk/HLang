@@ -283,7 +283,6 @@ let rec chk env want e =
           | _ -> err ln "シフトする量は 0〜15 の定数だけ"
         in
         let l = chk env (Some (num_ty [ l ])) l in
-        if o = ">>" && signed l.a then err ln "符号付きの数は >> できない（as u8 などで符号なしにする）";
         { x = Bin (o, l, { x = Int n; a = U8 }); a = l.a }
       | Bin ("*", l, r) ->
         (* 片方が定数の掛け算だけ。2 のべき乗ならシフトに直す。定数は右に寄せる。 *)
@@ -297,11 +296,11 @@ let rec chk env want e =
          | Some k -> { x = Bin ("<<", l, { x = Int k; a = U8 }); a = l.a }
          | None -> { x = Bin ("*", l, { x = Int (n land mask l.a); a = l.a }); a = l.a })
       | Bin ((("/" | "%") as o), l, r) ->
-        (* 2 のべき乗で割るならシフトとマスクで済む。それ以外は実行時のルーチンを呼ぶ。 *)
+        (* 符号なしの数を 2 のべき乗で割るならシフトとマスクで済む。それ以外は実行時のルーチンを呼ぶ。 *)
         let t = num_ty [ l; r ] in
-        if signed t then err ln "符号付きの数は割れない（as u8 などで符号なしにする）";
         let l = chk env (Some t) l in
-        (match Option.bind (ceval env r) log2 with
+        (* 符号付きの割り算は 0 の方へ丸めるので、シフト（小さい方へ丸める）にはできない *)
+        (match (if signed t then None else Option.bind (ceval env r) log2) with
          | Some k when o = "/" -> { x = Bin (">>", l, { x = Int k; a = U8 }); a = t }
          | Some k -> { x = Bin ("&", l, { x = Int ((1 lsl k) - 1); a = t }); a = t }
          | None -> { x = Bin (o, l, chk env (Some t) r); a = t })

@@ -493,6 +493,29 @@ fn main() {
   resume zako
   spawn solo()  resume solo
 }|}, "a000f b002d |b0001 |0001 d0028 b0001 s";
+  "符号付きのシフトと割り算", {|
+fn main() {
+  var a: i8 = -100
+  var b: i8 = 7
+  var z: i8 = 0
+  var m: i8 = -128
+  puth((a >> 1) as u8) puth((a >> 3) as u8) puth((a >> 7) as u8) puth((b >> 1) as u8) puth((a >> 9) as u8)
+  puth((a / b) as u8) puth((a % b) as u8) puth((b / a) as u8) puth((b % a) as u8)
+  puth((a / -7) as u8) puth((a % -7) as u8) puth((100 / (0 - b)) as u8) puth((a / 4) as u8) puth((a % 4) as u8)
+  puth((m / -1) as u8) puth((m % -1) as u8) puth((m / 2) as u8)
+  puth((a / z) as u8) puth((a % z) as u8) puth((b / z) as u8)
+  var w: i16 = -30000
+  var d: i16 = 7
+  var zz: i16 = 0
+  puth((w >> 1) as u16) puth((w >> 4) as u16) puth((w >> 8) as u16) puth((w >> 11) as u16) puth((w >> 15) as u16) puth((d >> 1) as u16)
+  puth((w / d) as u16) puth((w % d) as u16) puth((d / w) as u16) puth((d % w) as u16)
+  puth((w / -300) as u16) puth((w % -300) as u16) puth((w / 16) as u16) puth((w % 16) as u16)
+  puth((w / zz) as u16) puth((w % zz) as u16)
+  var e: i16 = a                          // 8bit の割り算の結果を 16bit へ
+  e = e / 3  puth(e as u16)
+  a /= 3  a >>= 1  puth(a as u8)
+}|}, "00ce 00f3 00ff 0003 00ff 00f2 00fe 0000 0007 000e 00fe 00f2 00e7 0000 0080 0000 00c0 0001 009c 00ff "
+   ^ "c568 f8ad ff8a fff1 ffff 0003 ef43 fffb 0000 0007 0064 0000 f8ad 0000 0001 8ad0 ffdf 00ef ";
   "入れ替え", {|
 fn main() {
   var a: u8 = 1

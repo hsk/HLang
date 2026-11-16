@@ -334,7 +334,8 @@ let rec exp c x t e (before : SS.t) (after : SS.t) =
   | U8, Sh (o, v, n) ->
     to_a c v;
     go ();
-    if n >= 8 then emit c "xor" [ a ]
+    if o = "sar" then times (min n 7) (fun () -> emit c "sra" [ a ])
+    else if n >= 8 then emit c "xor" [ a ]
     else times n (fun () -> if o = "<<" then emit c "add" [ a; a ] else emit c "srl" [ a ]);
     st c U8 x
   | _, Idx (s, v) ->
@@ -457,7 +458,13 @@ let rec exp c x t e (before : SS.t) (after : SS.t) =
     to_hl c v;
     go ();
     let l = R "l" and h = R "h" in
-    if n >= 16 then emit c "ld" [ hl; I (Num 0) ]
+    if o = "sar" then begin
+      if n >= 8 then begin                            (* 上位を下位へ写し、上位は符号で埋める *)
+        emit c "ld" [ l; h ]; emit c "ld" [ a; h ]; emit c "rla" []; emit c "sbc" [ a; a ]; emit c "ld" [ h; a ];
+        times (min (n - 8) 7) (fun () -> emit c "sra" [ l ])
+      end else times n (fun () -> emit c "sra" [ h ]; emit c "rr" [ l ])
+    end
+    else if n >= 16 then emit c "ld" [ hl; I (Num 0) ]
     else if o = "<<" then begin
       if n >= 8 then (emit c "ld" [ h; l ]; emit c "ld" [ l; I (Num 0) ]);
       times (n land 7) (fun () -> emit c "add" [ hl; hl ])
@@ -970,12 +977,28 @@ let rec term c (t : L.t) =
        c.hnear <- None;
        c.zf <- (match rename (Option.map (fun z -> V z) c.zf) with Some (V p) -> Some p | _ -> None);
        set_live c live;
-       let cc = compare c o ty x y in
-       raw c "jp" [ R cc; I (Sym yes_l) ];
-       c.zf <- None;
-       c.norot <- true;
-       term c no;
-       c.norot <- false
+       (* 比べる値が、いま渡した定数なら、条件はここで決まる（wait 48 の最初の「0 か」など） *)
+       let given = function
+         | V p -> (match List.find_opt (fun ((q, _), _) -> q = p) (List.combine ps args) with Some (_, C n) -> Some n | _ -> None)
+         | C n -> Some n
+         | S _ -> None
+       in
+       let known =
+         match given x, given y with
+         | Some a, Some b ->
+           let m = if ty = U8 then 0xff else 0xffff in
+           let a = a land m and b = b land m in
+           Some (match o with "==" -> a = b | "!=" -> a <> b | "<" -> a < b | ">=" -> a >= b | ">" -> a > b | _ -> a <= b)
+         | _ -> None
+       in
+       let exit () = c.zf <- None; c.norot <- true; term c no; c.norot <- false in
+       (match known with
+        | Some true -> raw c "jp" [ I (Sym yes_l) ]
+        | Some false -> exit ()
+        | None ->
+          let cc = compare c o ty x y in
+          raw c "jp" [ R cc; I (Sym yes_l) ];
+          exit ())
      | _ ->
        (* 飛び先が短い一本道で、値での分岐で終わるなら、飛ぶ代わりにその場へ複製する。
           jp の時間が浮き、その分だけ大きくなる。得かどうかは値段で決める。

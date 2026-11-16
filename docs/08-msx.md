@@ -44,7 +44,7 @@ openMSX で、PSG の周期と音量が曲のとおりに変わり、同時に�
 
 [examples/tracks.hl](../examples/tracks.hl) は、同じタスクを 3 個動かして（プール、7 章）、3 つのチャンネルを別々の曲データで鳴らします。
 
-[examples/game.hl](../examples/game.hl) は小さなシューティングです。カーソルキーの左右で動き、スペースで撃ちます。敵（4 匹まで）と弾（3 発まで）はプールのタスク、「敵を出す係」は 1 個だけのタスク、曲は割り込みで進む 2 トラックです。敵は符号付きの速度で左右に揺れ、当たり判定は `for b in shot { for e in zako { ... } }` で全部の組を突き合わせます。ROM は 1513 バイトです。openMSX でキーを押したことにして、敵が揺れながら降りる、弾が 3 発飛ぶ、当たると両方が消えて点が入る、自機が動く、曲が鳴り続ける、を確かめてあります。
+[examples/game.hl](../examples/game.hl) は小さなシューティングです。カーソルキーの左右で動き、スペースで撃ちます。敵（4 匹まで）と弾（3 発まで）はプールのタスク、「敵を出す係」は 1 個だけのタスク、曲は割り込みで進む 2 トラックです。敵は符号付きの速度で左右に揺れ、当たり判定は `for b in shot { for e in zako { ... } }` で全部の組を突き合わせます。ROM は 1494 バイトです。openMSX でキーを押したことにして、敵が揺れながら降りる、弾が 3 発飛ぶ、当たると両方が消えて点が入る、自機が動く、曲が鳴り続ける、を確かめてあります。
 
 `examples/` には Makefile があります。
 
@@ -79,6 +79,7 @@ make clean
 | 分類 | 関数 |
 | --- | --- |
 | 文字 | `chput(c)` `print(s)` `locate(x, y)` `chgmod(mode)` `chgclr()` |
+| 数 | `print_u8(v)` `print_u16(v)` `print_i8(v)` `print_i16(v)`（10 進。負の数は `-` を付ける） |
 | VDP | `wrtvdp(v, r)` `rdvrm(addr)` `wrtvrm(addr, v)` `filvrm(addr, n, v)` `ldirvm(src, dst, n)` `vram_at(addr)` |
 | PSG | `gicini()` `wrtpsg(r, v)` `rdpsg(r)` `tone(ch, period)` `volume(ch, v)` |
 | スプライト | `sprite(n, x, y, pat, color)` `sprite_pattern(pat, &表)` |

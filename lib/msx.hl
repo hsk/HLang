@@ -11,6 +11,23 @@ const BAKCLR = 0xf3ea
 const BDRCLR = 0xf3eb
 
 fn print(s: u16) { while mem[s] != 0 { chput(mem[s])  s += 1 } }
+
+// 数を 10 進で出す。上の桁の 0 は出さない。
+fn print_u16(v: u16) {
+  var d: u16 = 10000
+  var on = false
+  while d != 1 {
+    var q = v / d
+    if q != 0 || on { chput('0' + q as u8)  on = true }
+    v = v % d
+    d = d / 10
+  }
+  chput('0' + v as u8)
+}
+fn print_u8(v: u8) { print_u16(v) }
+fn print_i16(v: i16) { if v < 0 { chput('-')  v = -v }  print_u16(v as u16) }
+fn print_i8(v: i8) { print_i16(v) }
+
 fn locate(x: u8, y: u8) { var xy: u16 = x + 1  posit((xy << 8) + y + 1) }
 
 // ---- VDP ----

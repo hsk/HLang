@@ -121,7 +121,15 @@ let load (p : Check.prog) w =
       let sa, sb =
         if signed l.a then (let s v = if v > mask l.a / 2 then v - mask l.a - 1 else v in s a, s b) else a, b
       in
+      (* 符号付きの割り算: 絶対値どうしで割ってから符号を付ける。商は 0 の方へ丸まり、余りは割られる数と同じ符号 *)
+      let sdiv () =
+        let q, r = if sb = 0 then mask e.a, abs sa else abs sa / abs sb, abs sa mod abs sb in
+        (if (sa < 0) <> (sb < 0) then -q else q) land mask e.a, (if sa < 0 then -r else r) land mask e.a
+      in
       (match o with
+       | "/" when signed l.a -> fst (sdiv ())
+       | "%" when signed l.a -> snd (sdiv ())
+       | ">>" when signed l.a -> (sa asr b) land mask e.a
        | "+" -> (a + b) land mask e.a
        | "-" -> (a - b) land mask e.a
        | "*" -> (a * b) land mask e.a

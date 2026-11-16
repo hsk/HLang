@@ -13,7 +13,7 @@ type atom =
 type exp =
   | Atom of atom
   | Bin of string * atom * atom  (* + - & | ^ *)
-  | Sh of string * atom * int    (* << >> を定数回 *)
+  | Sh of string * atom * int    (* << >> sar を定数回。sar は符号ビットを保つ右シフト *)
   | Mulc of atom * int           (* 定数倍 *)
   | Idx of string * atom         (* 表の番地 + 8bit の添字。表はページをまたがない *)
   | Lut of string * atom         (* 256 バイト境界に置いた表を 8bit の添字で引く *)

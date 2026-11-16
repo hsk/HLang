@@ -245,7 +245,36 @@ let divmod =
       Label ".mod16.fits"; ins "inc" [ r "c" ];
       Label ".mod16.next"; ins "djnz" [ to_ ".mod16.bit" ]; ins "ret" [] ];
     ".div16", [ "hl"; "de" ], [ "a"; "b"; "c"; "h"; "l" ], [
-      Label ".div16"; ins "call" [ to_ ".mod16" ]; ins "ld" [ r "h"; a ]; ins "ld" [ r "l"; r "c" ]; ins "ret" [] ] ]
+      Label ".div16"; ins "call" [ to_ ".mod16" ]; ins "ld" [ r "h"; a ]; ins "ld" [ r "l"; r "c" ]; ins "ret" [] ];
+    (* 符号付き: 絶対値どうしで割ってから符号を付ける。商の符号は 2 つの符号の xor、余りの符号は割られる数と同じ *)
+    ".sdiv8", [ "a"; "e" ], [ "a"; "b"; "c"; "d"; "e" ], [
+      Label ".sdiv8"; ins "ld" [ r "d"; a ]; ins "xor" [ r "e" ]; ins "ld" [ r "c"; a ]; ins "ld" [ a; r "d" ];
+      ins "call" [ to_ ".abs8" ]; ins "call" [ to_ ".mod8" ]; ins "ld" [ a; r "d" ];
+      ins "bit" [ I (Num 7); r "c" ]; ins "ret" [ r "z" ]; ins "neg" []; ins "ret" [] ];
+    ".smod8", [ "a"; "e" ], [ "a"; "b"; "c"; "d"; "e" ], [
+      Label ".smod8"; ins "ld" [ r "c"; a ]; ins "call" [ to_ ".abs8" ]; ins "call" [ to_ ".mod8" ];
+      ins "bit" [ I (Num 7); r "c" ]; ins "ret" [ r "z" ]; ins "neg" []; ins "ret" [] ];
+    ".abs8", [], [ "a"; "d"; "e" ], [                           (* A と E を絶対値にする *)
+      Label ".abs8"; ins "or" [ a ]; ins "jp" [ r "p"; to_ ".abs8.e" ]; ins "neg" [];
+      Label ".abs8.e"; ins "ld" [ r "d"; a ]; ins "ld" [ a; r "e" ]; ins "or" [ a ]; ins "jp" [ r "p"; to_ ".abs8.ok" ];
+      ins "neg" []; ins "ld" [ r "e"; a ];
+      Label ".abs8.ok"; ins "ld" [ a; r "d" ]; ins "ret" [] ];
+    ".sdiv16", [ "hl"; "de" ], all8, [
+      Label ".sdiv16"; ins "ld" [ a; r "h" ]; ins "xor" [ r "d" ]; ins "push" [ r "af" ];
+      ins "call" [ to_ ".abs16" ]; ins "call" [ to_ ".mod16" ]; ins "ld" [ r "h"; a ]; ins "ld" [ r "l"; r "c" ];
+      ins "pop" [ r "af" ]; ins "ret" [ r "p" ]; ins "jp" [ to_ ".neg16" ] ];
+    ".smod16", [ "hl"; "de" ], all8, [
+      Label ".smod16"; ins "ld" [ a; r "h" ]; ins "or" [ a ]; ins "push" [ r "af" ];
+      ins "call" [ to_ ".abs16" ]; ins "call" [ to_ ".mod16" ];
+      ins "pop" [ r "af" ]; ins "ret" [ r "p" ]; ins "jp" [ to_ ".neg16" ] ];
+    ".abs16", [], all8, [                                       (* HL と DE を絶対値にする *)
+      Label ".abs16"; ins "bit" [ I (Num 7); r "h" ]; ins "call" [ r "nz"; to_ ".neg16" ];
+      ins "bit" [ I (Num 7); r "d" ]; ins "ret" [ r "z" ];
+      ins "xor" [ a ]; ins "sub" [ r "e" ]; ins "ld" [ r "e"; a ]; ins "sbc" [ a; a ]; ins "sub" [ r "d" ];
+      ins "ld" [ r "d"; a ]; ins "ret" [] ];
+    ".neg16", [], [ "a"; "h"; "l" ], [                          (* HL の符号を変える *)
+      Label ".neg16"; ins "xor" [ a ]; ins "sub" [ r "l" ]; ins "ld" [ r "l"; a ]; ins "sbc" [ a; a ]; ins "sub" [ r "h" ];
+      ins "ld" [ r "h"; a ]; ins "ret" [] ] ]
 
 let fn ~opt ~info ~exts (f : Ir.fn) =
   let code, data, phome, slots = solve ~opt ~info ~exts f (L.annotate f) (L.vars f) in
@@ -314,6 +343,16 @@ let program ~opt (tg : target) (p : Check.prog) (fns : Ir.fn list) : line list =
   let times = Hashtbl.create 16 in
   report := [];
   let tasks = ref [] and seen = Hashtbl.create 16 and extra = ref [] and frames = ref [] in
+  (* 呼ぶ先の時間の上限。割り算のルーチンは、初めて聞かれたときに測る *)
+  let rec callee g =
+    match Hashtbl.find_opt times g, List.find_opt (fun (l, _, _, _) -> l = g) divmod with
+    | Some b, _ -> b
+    | None, Some (_, _, _, lines) ->
+      let b = Report.bound lines [] callee [ g ] in
+      Hashtbl.replace times g b;
+      b
+    | None, None -> Report.Unknown
+  in
   let rec visit (f : Ir.fn) =
     if not (Hashtbl.mem seen f.name) then begin
       Hashtbl.replace seen f.name ();
@@ -335,9 +374,26 @@ let program ~opt (tg : target) (p : Check.prog) (fns : Ir.fn list) : line list =
         f.name :: List.filter_map (function Label l when f.task && String.starts_with ~prefix:(f.name ^ ".resume") l
                                                          && l <> f.name ^ ".resume" -> Some l | _ -> None) c
       in
-      let callee g = match Hashtbl.find_opt times g with Some b -> b | None -> Report.Unknown in
       let time = Report.bound c d callee starts in
       Hashtbl.replace times f.name time;
+      (* resume の時間: 1 個だけのタスクは「続きへ飛ぶ」分を足す。プールは、個体を順に回る手間と、個体の数 × 本体 *)
+      let plus k = function
+        | Report.Known (t, e), Report.Known (u, e') -> Report.Known (t + (k * u), e || e')
+        | _ -> Report.Unknown
+      in
+      if f.task then begin
+        match List.find_opt (fun (t, _, _) -> t = f.name) p.pools with
+        | Some (t, n, size) ->
+          List.iter
+            (fun (l, lines) ->
+              let b = Report.bound lines [] callee [ l ] in
+              Hashtbl.replace times l (if l = t ^ ".resume" then plus n (b, time) else b))
+            (pool_code t n size)
+        | None ->
+          let t i = snd (fst (Cost.measure i)) in
+          let jump = t ("ld", [ R "hl"; M (I (Num 0)) ]) + t ("jp", [ M (R "hl") ]) in
+          Hashtbl.replace times (f.name ^ ".resume") (plus 1 (Report.Known (jump, false), time))
+      end;
       let bytes = List.fold_left (fun n l -> match l with Ins x -> n + snd (Cost.measure x) | _ -> n) 0 c in
       report := !report @ [ { fn = f; bytes; homes = i.phome; clobbers = i.clob; time } ];
       code := !code @ c;
@@ -358,9 +414,17 @@ let program ~opt (tg : target) (p : Check.prog) (fns : Ir.fn list) : line list =
   List.iter (function Ins (_, args) -> List.iter arg args | _ -> ()) !code;
   (* プールのルーチンは、呼ばれているものだけ足す *)
   code := !code @ List.concat_map (fun (l, lines) -> if Hashtbl.mem used l then lines else []) !extra;
-  (* 割り算のルーチン。div は mod を呼ぶので、div を使うなら mod も要る *)
-  let need l = Hashtbl.mem used l || Hashtbl.mem used (".div" ^ String.sub l 4 (String.length l - 4)) in
-  code := !code @ List.concat_map (fun (l, _, _, lines) -> if need l then lines else []) divmod;
+  (* 割り算のルーチン。使われたものと、それが呼ぶもの（div は mod を呼ぶ）だけ足す *)
+  let rec grow () =
+    let n = Hashtbl.length used in
+    List.iter
+      (fun (l, _, _, lines) ->
+        if Hashtbl.mem used l then List.iter (function Ins (_, args) -> List.iter arg args | _ -> ()) lines)
+      divmod;
+    if Hashtbl.length used > n then grow ()
+  in
+  grow ();
+  code := !code @ List.concat_map (fun (l, _, _, lines) -> if Hashtbl.mem used l then lines else []) divmod;
   slots := List.filter (fun (l, _) -> Hashtbl.mem used l) !slots;
   (* RAM に置くもの: (名前, バイト数)。大域変数、関数の変数、配列の順。 *)
   let w t = if Ast.wide t then 2 else 1 in

@@ -77,11 +77,13 @@ let rec exp (env : env) (e : A.ty A.expr) (k : atom -> term) : term =
   | Bin ("+", { x = Addr s; _ }, { x = Bin ("<<", { x = Cast (A.U16, i); _ }, { x = Int 1; _ }); _ })
     when Hashtbl.mem small s && not (A.wide i.a) ->
     exp env i (fun a -> bind U8 (Sh ("<<", a, 1)) (fun d -> bind U16 (Idx (s, d)) k))
-  | Bin ((("<<" | ">>") as o), l, { x = Int n; _ }) -> exp env l (fun a -> bind t (Sh (o, a, n)) k)
+  | Bin ((("<<" | ">>") as o), l, { x = Int n; _ }) ->
+    let o = if o = ">>" && A.signed l.a then "sar" else o in      (* 符号付きの >> は、符号ビットを保つ *)
+    exp env l (fun a -> bind t (Sh (o, a, n)) k)
   | Bin ("*", l, { x = Int n; _ }) -> exp env l (fun a -> bind t (Mulc (a, n)) k)
   | Bin ((("/" | "%") as o), l, r) ->
     (* 割り算と余りは、実行時のルーチン（Alloc の divmod）を呼ぶ *)
-    let f = (if o = "/" then "div" else "mod") ^ if t = U8 then "8" else "16" in
+    let f = (if A.signed e.a then "s" else "") ^ (if o = "/" then "div" else "mod") ^ if t = U8 then "8" else "16" in
     exp env l (fun a -> exp env r (fun b -> let x = fresh "t" in Call (Some (x, t), "." ^ f, [ a, t; b, t ], k (V x))))
   | Bin (o, l, r) -> exp env l (fun a -> exp env r (fun b -> bind t (Bin (o, a, b)) k))
   | Un (o, a) -> exp env a (fun a -> bind t (Un (o, a)) k)
