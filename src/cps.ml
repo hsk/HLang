@@ -95,6 +95,23 @@ let rec exp (env : env) (e : A.ty A.expr) (k : atom -> term) : term =
     in
     go [] args
   | Mem (_, a) -> exp env a (fun a -> bind t (Load a) k)
+  | Spawn (t, args) when Hashtbl.mem pools t ->
+    (* 空いているフレームをもらい（HL で返る）、その先頭から順に引数を書く。フレームの番地が式の値 *)
+    let rec go acc = function
+      | (a : A.ty A.expr) :: rest -> exp env a (fun v -> go ((v, ty_of a.a) :: acc) rest)
+      | [] ->
+        let s = fresh "t" in
+        let rec store off = function
+          | [] -> k (V s)
+          | (v, t) :: rest ->
+            let next = store (off + if t = U8 then 1 else 2) rest in
+            if off = 0 then Store (t, V s, v, next)
+            else (let m = fresh "t" in Let (m, U16, Bin ("+", V s, C off), Store (t, V m, v, next)))
+        in
+        Call (Some (s, U16), t ^ ".spawn", [], store 0 (List.rev acc))
+    in
+    go [] args
+  | Spawn (t, _) -> Store (U16, S (t ^ ".pc"), S t, k (C 0))  (* 続きの番地を、本体の先頭にする *)
   | Port { x = Int p; _ } -> bind U8 (In p) k
   | Port _ -> assert false
   | Cast (to_, a) ->
@@ -187,23 +204,6 @@ and stmt lp (env : env) (s : A.ty A.stmt) (k : env -> term) : term =
   | Return (Some e) -> exp env e (fun a -> Ret (Some (a, ty_of e.a)))
   | Yield -> Yield (k env)
   | Wait _ -> assert false
-  | Spawn (t, args) when Hashtbl.mem pools t ->
-    (* 空いているフレームをもらい（HL で返る）、その先頭から順に引数を書く *)
-    let rec go acc = function
-      | (a : A.ty A.expr) :: rest -> exp env a (fun v -> go ((v, ty_of a.a) :: acc) rest)
-      | [] ->
-        let s = fresh "t" in
-        let rec store off = function
-          | [] -> k env
-          | (v, t) :: rest ->
-            let next = store (off + if t = U8 then 1 else 2) rest in
-            if off = 0 then Store (t, V s, v, next)
-            else (let m = fresh "t" in Let (m, U16, Bin ("+", V s, C off), Store (t, V m, v, next)))
-        in
-        Call (Some (s, U16), t ^ ".spawn", [], store 0 (List.rev acc))
-    in
-    go [] args
-  | Spawn (t, _) -> Store (U16, S (t ^ ".pc"), S t, k env)  (* 続きの番地を、本体の先頭にする *)
   | Resume t -> Call (None, t ^ ".resume", [], k env)
   | Each (x, t, b) -> block lp env (Check.each !frames x t b) (fun env -> k (List.remove_assoc x (List.remove_assoc (x ^ ".left") env)))
   | Stop (t, None) when Hashtbl.mem pools t ->

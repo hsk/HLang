@@ -10,7 +10,7 @@ let rec pure_e luts (e : ty expr) =
   let p = pure_e luts in
   match e.x with
   | Int _ | Tf _ | Var _ -> true
-  | Str _ | Glob _ | Addr _ | Mem _ | Port _ | Index _ | Field _ | Running _ -> false
+  | Str _ | Glob _ | Addr _ | Mem _ | Port _ | Index _ | Field _ | Running _ | Spawn _ -> false
   | Bin (_, a, b) -> p a && p b
   | Un (_, a) | Cast (_, a) | Lut (_, a) -> p a
   | Call (f, args) -> List.mem f luts && List.for_all p args
@@ -26,7 +26,7 @@ let rec pure_s luts = function
     pure_e luts e
     && List.for_all (pure_s luts) (List.concat_map snd arms @ Option.value ~default:[] other)
   | Break | Continue | Return None -> true
-  | Yield | Wait _ | Spawn _ | Resume _ | Each _ | Stop _ -> false
+  | Yield | Wait _ | Resume _ | Each _ | Stop _ -> false
 
 (* 式の中の lut fn の呼び出しを、表引きに直す *)
 let rec map_e luts (e : ty expr) : ty expr =
@@ -40,6 +40,7 @@ let rec map_e luts (e : ty expr) : ty expr =
     | Mem (t, a) -> Mem (t, m a)
     | Cast (t, a) -> Cast (t, m a)
     | Lut (f, a) -> Lut (f, m a)
+    | Spawn (t, args) -> Spawn (t, List.map m args)
     | x -> x
   in
   { e with x }
@@ -55,7 +56,6 @@ let rec map_s luts s =
   | Match (v, arms, other) -> Match (e v, List.map (fun (ps, body) -> ps, b body) arms, Option.map b other)
   | Return (Some v) -> Return (Some (e v))
   | Do v -> Do (e v)
-  | Spawn (t, args) -> Spawn (t, List.map e args)
   | (Break | Continue | Return None | Yield | Wait _ | Resume _ | Each _ | Stop _) as s -> s
 
 let apply (p : Check.prog) : Check.prog =

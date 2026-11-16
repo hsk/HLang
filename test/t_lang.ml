@@ -470,6 +470,29 @@ fn main() {
   var i: i8 = -3
   while i < 3 { putc('a' + (i + 3) as u8)  i += 1 }
 }|}, "0062 03e6 02ba -0+--+0001 0000 0001 0001 0001 0000 0001 fffe 0000 0001 0002 00fd -0001 abcdef";
+  "spawn が個体を返す", {|
+task zako(id: u8, x: u8) pool 2 {
+  loop { putc('a' + id)  puth(x)  yield }
+}
+task solo() { putc('s') }
+var last: *zako
+fn main() {
+  var a = spawn zako(0, 10)
+  var b = spawn zako(1, 20)
+  var c = spawn zako(2, 30)               // 空きがない: 動かない予備の枠を指す
+  last = b
+  a.x += 5
+  b.x = a.x + c.x
+  resume zako  putc('|')
+  stop a
+  last.x = 1
+  resume zako  putc('|')
+  var d = spawn zako(3, 40)               // a のいた枠が空いている
+  puth(((d as u16) == (a as u16)) as u8)
+  stop c                                  // 予備の枠を止めても何も起きない
+  resume zako
+  spawn solo()  resume solo
+}|}, "a000f b002d |b0001 |0001 d0028 b0001 s";
   "入れ替え", {|
 fn main() {
   var a: u8 = 1

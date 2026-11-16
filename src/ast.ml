@@ -32,6 +32,7 @@ and 'a desc =
   | Port of 'a expr                            (* port[n] *)
   | Cast of ty * 'a expr
   | Running of string                          (* running(タスク): まだ終わっていないか *)
+  | Spawn of string * 'a expr list             (* タスクを最初から始める状態にする。プールなら、始めた個体を指す値になる *)
 
 type 'a stmt =
   | Let of string * ty option * 'a expr
@@ -47,7 +48,6 @@ type 'a stmt =
   | Do of 'a expr
   | Yield                                      (* タスクを中断して、resume した側へ戻る *)
   | Wait of 'a expr                            (* n 回 yield する。型検査が while と yield に直す *)
-  | Spawn of string * 'a expr list             (* タスクを最初から始める状態にする *)
   | Resume of string                           (* タスクを次の yield まで進める *)
   | Each of string * string * 'a stmt list     (* for e in タスク: 動いている個体を順に見る *)
   | Stop of string * 'a expr option            (* stop タスク / stop 個体: 止める *)

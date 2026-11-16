@@ -73,6 +73,7 @@ let parse ?base src =
     | Id "mem" -> mk ln (Mem (U8, index ()))
     | Id "mem16" -> mk ln (Mem (U16, index ()))
     | Id "port" -> mk ln (Port (index ()))
+    | Id "spawn" -> let t = ident () in expect "("; mk ln (Spawn (t, args ")"))
     | Id f when peek () = P "(" -> incr i; mk ln (Call (f, args ")"))
     | Id v -> suffix (mk ln (Var v))
     | P "(" -> let e = expr () in expect ")"; e
@@ -133,7 +134,6 @@ let parse ?base src =
     end
     else if kw "yield" then Yield
     else if kw "wait" then Wait (expr ())
-    else if kw "spawn" then (let t = ident () in expect "("; Spawn (t, args ")"))
     else if kw "resume" then Resume (ident ())
     else if kw "stop" then Stop ("", Some (expr ()))
     else if kw "break" then Break

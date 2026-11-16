@@ -60,7 +60,7 @@ let load (p : Check.prog) w =
     p.arrays;
   List.iteri (fun i (f : ty fn) -> Hashtbl.replace addrs f.name (0x100 + i)) p.fns;   (* 関数の番地（仮） *)
   (* プールのフレームを置く場所。タスクの状態は (名前, 何番目か) ごとに持つ。 *)
-  List.iter (fun (t, n, size) -> Hashtbl.replace addrs (t ^ ".pool") !atop; atop := !atop + (n * size)) p.pools;
+  List.iter (fun (t, n, size) -> Hashtbl.replace addrs (t ^ ".pool") !atop; atop := !atop + ((n + 1) * size)) p.pools;   (* 最後の 1 つは予備の枠 *)
   let pool t = List.find_map (fun (u, n, size) -> if u = t then Some (n, size) else None) p.pools in
   let frame t i size = Hashtbl.find addrs (t ^ ".pool") + (i * size) + 2 in
   let slots t = match pool t with Some (n, _) -> List.init n Fun.id | None -> [ 0 ] in
@@ -146,6 +146,19 @@ let load (p : Check.prog) w =
     | Call (f, args) -> call f (List.map ev args) land (if e.a = Unit then 0 else mask e.a)
     | Mem (t, a) -> peek t (ev a)
     | Port p -> w.inp (ev p) land 0xff
+    | Spawn (t, args) ->
+      let vs = List.map (fun (a : ty expr) -> ev a, a.a) args in
+      (match pool t with
+       | None -> set (t, 0) Fresh; 0
+       | Some (n, size) ->
+         (* 空いている最初の枠を使う。空きがなければ、走らせない予備の枠（n 番目）を使う。
+            引数はフレームの先頭から順に置く。フレームの番地が式の値。 *)
+         let i = match List.find_opt (fun i -> state (t, i) = Idle) (slots t) with
+           | Some i -> set (t, i) Fresh; i
+           | None -> n
+         in
+         ignore (List.fold_left (fun a (v, ty) -> poke ty a v; a + if wide ty then 2 else 1) (frame t i size) vs);
+         frame t i size)
     | Running t -> Bool.to_int (List.exists (fun i -> state (t, i) <> Idle) (slots t))
     | Cast (Bool, a) -> Bool.to_int (ev a <> 0)
     | Cast (t, a) when wide t && a.a = I8 -> let v = ev a in (if v > 127 then v - 256 else v) land mask t
@@ -189,17 +202,6 @@ let load (p : Check.prog) w =
     | Do e -> ignore (eval vars e)
     | Yield -> Effect.perform Pause
     | Wait _ -> assert false
-    | Spawn (t, args) ->
-      let vs = List.map (fun (a : ty expr) -> eval vars a, a.a) args in
-      (match pool t with
-       | None -> set (t, 0) Fresh
-       | Some (_, size) ->
-         (* 空いている最初の枠を使う。空きがなければ何もしない。引数はフレームの先頭から順に置く。 *)
-         (match List.find_opt (fun i -> state (t, i) = Idle) (slots t) with
-          | None -> ()
-          | Some i ->
-            set (t, i) Fresh;
-            ignore (List.fold_left (fun a (v, ty) -> poke ty a v; a + if wide ty then 2 else 1) (frame t i size) vs)))
     | Each (x, t, b) -> block vars (Check.each p.pools x t b)
     | Stop (t, None) -> List.iter (fun i -> set (t, i) Idle) (slots t)
     | Stop (t, Some e) ->

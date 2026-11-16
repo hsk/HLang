@@ -133,6 +133,7 @@ let rec hint env e =
   | Mem (t, _) | Cast (t, _) -> Some t
   | Port _ -> Some U8
   | Running _ -> Some Bool
+  | Spawn (t, _) -> Some (if Hashtbl.mem env.structs t then Ptr t else Unit)
 
 let log2 n =
   let rec go k = if 1 lsl k = n then Some k else if 1 lsl k > n then None else go (k + 1) in
@@ -204,6 +205,12 @@ let rec chk env want e =
         else if Hashtbl.mem env.svars v then { x = Addr v; a = Ptr (Hashtbl.find env.svars v) }
         else err ln "& で番地を取れるのは、引数のない関数と、表・配列だけ: %s" v
       | Call ("running", [ { x = Var t; _ } ]) when Hashtbl.mem env.tasks t -> { x = Running t; a = Bool }
+      | Spawn (t, args) ->
+        (* プールなら、始めた個体を指す値になる（空きがなければ、動かない予備の枠を指す） *)
+        let ps = match Hashtbl.find_opt env.tasks t with Some ps -> ps | None -> err ln "知らないタスク: %s" t in
+        if List.length ps <> List.length args then err ln "%s の引数は %d 個" t (List.length ps);
+        let args = List.map2 (fun t a -> chk env (Some t) a) ps args in
+        { x = Spawn (t, args); a = (if Hashtbl.mem env.structs t then Ptr t else Unit) }
       | Tf b -> { x = Tf b; a = Bool }
       | Str s -> { x = Str s; a = U16 }
       | Var v ->
@@ -477,11 +484,6 @@ and stmt env ln s : ty stmt list =
       in
       fun () ->
         While ({ x = Bin ("!=", n, int 0); a = Bool }, [ Yield; Set (n, { x = Bin ("-", n, int 1); a = U8 }) ])
-    | Spawn (t, args) ->
-      let ps = match Hashtbl.find_opt env.tasks t with Some ps -> ps | None -> err ln "知らないタスク: %s" t in
-      if List.length ps <> List.length args then err ln "%s の引数は %d 個" t (List.length ps);
-      let args = List.map2 (fun t a -> chk env (Some t) a) ps args in
-      fun () -> Spawn (t, args)
     | Resume t ->
       if not (Hashtbl.mem env.tasks t) then err ln "知らないタスク: %s" t;
       env.calls <- t :: env.calls;
@@ -506,7 +508,7 @@ and stmt env ln s : ty stmt list =
     | Stop (_, None) -> assert false
     | Do e ->
       (match e.x with
-       | Call _ -> let e = chk env None e in fun () -> Do e
+       | Call _ | Spawn _ -> let e = chk env None e in fun () -> Do e
        | _ -> err e.a "この式は文として使えない")
   in
   let pre = take env in
