@@ -125,19 +125,8 @@ let fn (size : string -> int option) (f : fn) : fn =
               go b)
       | Jump (k, args) ->
         (* 定数の添字を渡していた所は、表の番地 + 定数を渡す *)
-        let pre = ref [] in
-        let args =
-          List.map2
-            (fun (p, _) a ->
-              match a with
-              | C c when conv p ->
-                let s = Hashtbl.find target p in
-                if c = 0 then S s
-                else (let x = fresh () in pre := (x, s, c) :: !pre; V x)
-              | a -> a)
-            (Hashtbl.find konts k) args
-        in
-        List.fold_left (fun t (x, s, c) -> Let (x, U16, Bin ("+", S s, C c), t)) (Jump (k, args)) !pre
+        Jump (k, List.map2 (fun (p, _) a -> match a with C c when conv p -> S (Hashtbl.find target p, c) | a -> a)
+                   (Hashtbl.find konts k) args)
       | If (o, t, a, b, x, y) -> If (o, t, a, b, go x, go y)
       | (Switch _ | Ret _) as t -> t
     in

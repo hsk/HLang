@@ -8,7 +8,7 @@ type ty = U8 | U16
 type atom =
   | V of string                  (* 変数 *)
   | C of int                     (* 定数 *)
-  | S of string                  (* ラベルの番地 *)
+  | S of string * int            (* ラベルの番地 + 定数 *)
 
 type exp =
   | Atom of atom
@@ -51,7 +51,7 @@ type fn = {
 (* ---- 読める形にする ---- *)
 
 let ty = function U8 -> "u8" | U16 -> "u16"
-let atom = function V v -> v | C n -> string_of_int n | S s -> "&" ^ s
+let atom = function V v -> v | C n -> string_of_int n | S (s, 0) -> "&" ^ s | S (s, n) -> Printf.sprintf "&%s%+d" s n
 let atoms l = String.concat ", " (List.map atom l)
 let params ps = String.concat ", " (List.map (fun (x, t) -> x ^ ": " ^ ty t) ps)
 

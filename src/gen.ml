@@ -147,7 +147,9 @@ let fresh c base = c.n <- c.n + 1; Printf.sprintf "%s.%s%d" c.f base c.n
 
 let loc c t = function
   | C n -> Imm (Num (if t = U8 then n land 0xff else n land 0xffff))
-  | S s -> Imm (if t = U8 then Lo (Sym s) else Sym s)
+  | S (s, n) ->
+    let e = if n = 0 then Sym s else Add (Sym s, Num n) in
+    Imm (if t = U8 then Lo e else e)
   | V x -> let h = c.home x in if is_mem h then Slot h else Reg h
 
 (* 空いている作業用レジスタを選ぶ *)
@@ -721,17 +723,37 @@ let rec term c (t : L.t) =
     attempt c
       (fun () ->
         let hx = c.home x and n = Option.get (disp o d) and viahl = c.home p = "hl" in
-        set_live c (SS.remove x k.lv);
-        (match ty with
-         | U8 when is_mem hx -> let f = field c p n in emit c "ld" [ a; f ]; c.walking <- false; st c U8 x
-         | U8 when viahl && (hx = "h" || hx = "l") -> raise (Stuck "HL を歩きながら H, L には読めない")
-         | U8 -> let f = field c p n in emit c "ld" [ R hx; f ]
-         | U16 when hx = "de" || hx = "bc" || (hx = "hl" && not viahl) ->
-           let f = field c p n in emit c "ld" [ R (lo hx); f ];
-           let f = field2 c p n in emit c "ld" [ R (hi hx); f ]
-         | U16 -> raise (Stuck "16bit のフィールドは DE か BC に読む"));
-        c.walking <- false;
-        term c k)
+        let read () =
+          set_live c (SS.remove x k.lv);
+          (match ty with
+           | U8 when is_mem hx -> let f = field c p n in emit c "ld" [ a; f ]; c.walking <- false; st c U8 x
+           | U8 when viahl && (hx = "h" || hx = "l") -> raise (Stuck "HL を歩きながら H, L には読めない")
+           | U8 -> let f = field c p n in emit c "ld" [ R hx; f ]
+           | U16 when hx = "de" || hx = "bc" || (hx = "hl" && not viahl) ->
+             let f = field c p n in emit c "ld" [ R (lo hx); f ];
+             let f = field2 c p n in emit c "ld" [ R (hi hx); f ]
+           | U16 -> raise (Stuck "16bit のフィールドは DE か BC に読む"));
+          c.walking <- false;
+          term c k
+        in
+        match ty, k.n with
+        | U8, L.Let (y, U8, Bin (op, v, w), k2)
+          when (not (SS.mem x k2.lv)) && ((w = V x && v <> V x) || (v = V x && w <> V x && op <> "-")) ->
+          (* 読んですぐ演算に使うなら、add a,(hl) や add a,(ix+d) の 1 命令にまとめる *)
+          attempt c
+            (fun () ->
+              let after = SS.remove y k2.lv in
+              set_live c (SS.union t.lv after);
+              to_a c (if w = V x then v else w);
+              set_live c after;
+              let f = field c p n in
+              alu c (op8 op) f;
+              c.walking <- false;
+              st c U8 y;
+              c.zf <- Some y;
+              term c k2)
+            read
+        | _ -> read ())
       (fun () -> exp c m U16 e t.lv (SS.remove m inner.lv); term c inner)
   | L.Let (m, U16, (Bin ((("+" | "-") as o), V p, d) as e), ({ n = L.Store (ty, V m', v, k); _ } as inner))
     when m' = m && v <> V m && (not (SS.mem m k.lv)) && fieldable c p && disp o d <> None ->

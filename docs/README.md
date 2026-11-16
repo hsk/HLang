@@ -7,7 +7,7 @@ hlang は Z80 向けの小さなコンパイル言語です。この文書は、
 | [1. エミュレータ](01-emulator.md) | Z80 を動かす。検証の土台 | [emu/z80.ml](../emu/z80.ml) |
 | [2. アセンブラと逆アセンブラ](02-assembler.md) | 命令をデータで持ち、機械語とテキストにする | [src/asm.ml](../src/asm.ml), [src/dis.ml](../src/dis.ml), [src/cost.ml](../src/cost.ml) |
 | [3. 言語の表側](03-language.md) | 字句解析、構文解析、型検査、参照インタプリタ | [src/lex.ml](../src/lex.ml), [src/parse.ml](../src/parse.ml), [src/check.ml](../src/check.ml), [src/interp.ml](../src/interp.ml) |
-| [4. 継続だけの中間表現](04-cps.md) | 分岐もループも「継続へ飛ぶ」にする | [src/ir.ml](../src/ir.ml), [src/cps.ml](../src/cps.ml), [src/live.ml](../src/live.ml) |
+| [4. 継続だけの中間表現](04-cps.md) | 分岐もループも「継続へ飛ぶ」にする | [src/ir.ml](../src/ir.ml), [src/cps.ml](../src/cps.ml), [src/live.ml](../src/live.ml), [src/opt.ml](../src/opt.ml) |
 | [5. コード生成と置き場所の探索](05-codegen.md) | HL を活かす。呼び出し規約を関数ごとに決める | [src/gen.ml](../src/gen.ml), [src/alloc.ml](../src/alloc.ml) |
 | [6. インタプリタを書くための部品](06-interpreter.md) | 列挙型、網羅性チェック付きの match（出し方は測って選ぶ）、next、表と配列、添字をポインタに直す最適化、手書きとの比較 | [src/check.ml](../src/check.ml), [src/cps.ml](../src/cps.ml), [src/gen.ml](../src/gen.ml), [src/ptr.ml](../src/ptr.ml) |
 

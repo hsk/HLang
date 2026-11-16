@@ -170,7 +170,7 @@ run.case.22:
 
 | 版 | 時間 | 命令 1 つあたり |
 | --- | --- | --- |
-| hlang、手書きと同じ書き方（[bench/vm_top.hl](../bench/vm_top.hl)） | 142,413 T | 89 T |
+| hlang、手書きと同じ書き方（[bench/vm_top.hl](../bench/vm_top.hl)） | 142,407 T | 89 T |
 | 手書き、スタックはメモリ（[bench/vm.asm](../bench/vm.asm)） | 146,348 T | 91 T |
 | 手書き、CPU のスタック（[bench/vm_sp.asm](../bench/vm_sp.asm)） | 153,978 T | 96 T |
 | hlang、`mem[sp - 1]` で書く（[bench/vm_ptr.hl](../bench/vm_ptr.hl)） | 157,986 T | 99 T |

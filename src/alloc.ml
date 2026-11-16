@@ -165,8 +165,10 @@ let solve ~opt ~info ~exts (f : Ir.fn) body vars =
         (fun (x, _, _) (y, _, _) -> compare (Hashtbl.find weight y) (Hashtbl.find weight x))
         (List.filter (fun (x, _, _) -> Hashtbl.find cls x = x) vars)
     in
-    (* 2 周する。周りの置き場所が決まった後で、もっと良い場所が見つかることがある。 *)
-    for _ = 1 to 2 do
+    (* 何周かする。周りの置き場所が決まった後で、もっと良い場所が見つかることがある
+       （A に置く値が決まって初めて、ポインタを HL に置ける、など）。良くならなかった周で終わり。 *)
+    let round () =
+      let was = !best in
       List.iter
         (fun (x, t, _) ->
           if Hashtbl.find cls x = x then begin
@@ -184,8 +186,12 @@ let solve ~opt ~info ~exts (f : Ir.fn) body vars =
                @ [ "" ]);
             Hashtbl.replace chome x !pick
           end)
-        reps
-    done
+        reps;
+      !best < was
+    in
+    let rec rounds n = if n > 0 && round () && n > 1 then rounds (n - 1) in
+    ignore (round ());
+    rounds 4
   end;
   let code, data = gen () in
   (* メモリ上の置き場所の候補。実際に使われたものだけ、後で番地を割り当てる。 *)
@@ -318,7 +324,7 @@ type target = {
 
 (* 項が名前で指しているもの: 呼ぶ関数と、番地を使う関数・タスク *)
 let rec uses t =
-  let syms l = List.filter_map (function S s -> Some s | _ -> None) l in
+  let syms l = List.filter_map (function S (s, _) -> Some s | _ -> None) l in
   match t with
   | Ir.Call (_, g, args, k) -> (g :: syms (List.map fst args)) @ uses k
   | Ir.Let (_, _, e, k) -> syms (L.atoms_of e) @ uses k

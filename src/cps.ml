@@ -58,10 +58,10 @@ let rec exp (env : env) (e : A.ty A.expr) (k : atom -> term) : term =
   match e.x with
   | Int n -> k (C n)
   | Tf b -> k (C (Bool.to_int b))
-  | Str s -> k (S (str s))
+  | Str s -> k (S (str s, 0))
   | Var v -> k (fst (List.assoc v env))
-  | Glob g -> bind t (Load (S g)) k
-  | Addr x -> k (S x)
+  | Glob g -> bind t (Load (S (g, 0))) k
+  | Addr x -> k (S (x, 0))
   | Index _ | Field _ -> assert false
   | Lut (f, a) -> exp env a (fun a -> bind t (Lut (f ^ ".lut", a)) k)
   | Bin (("&&" | "||"), _, _) | Un ("!", _) | Running _ ->
@@ -113,7 +113,7 @@ let rec exp (env : env) (e : A.ty A.expr) (k : atom -> term) : term =
         Call (Some (s, U16), t ^ ".spawn", [], store 0 (List.rev acc))
     in
     go [] args
-  | Spawn (t, _) -> Store (U16, S (t ^ ".pc"), S t, k (C 0))  (* 続きの番地を、本体の先頭にする *)
+  | Spawn (t, _) -> Store (U16, S (t ^ ".pc", 0), S (t, 0), k (C 0))  (* 続きの番地を、本体の先頭にする *)
   | Port { x = Int p; _ } -> bind U8 (In p) k
   | Port _ -> assert false
   | Cast (to_, a) ->
@@ -141,7 +141,7 @@ and cond env (e : A.ty A.expr) yes no : term =
     Call (Some (x, U8), t ^ ".live", [], If ("!=", U8, V x, C 0, yes (), no ()))
   | Running t ->
     (* 続きの番地が「終わり」を指していなければ、まだ動いている *)
-    bind U16 (Load (S (t ^ ".pc"))) (fun a -> If ("!=", U16, a, S (t ^ ".done"), yes (), no ()))
+    bind U16 (Load (S (t ^ ".pc", 0))) (fun a -> If ("!=", U16, a, S (t ^ ".done", 0), yes (), no ()))
   | Bin (o, l, r) when is_cmp o ->
     let t = ty_of l.a in
     exp env l (fun a -> exp env r (fun b -> flip l.a t o a (fun a -> flip l.a t o b (fun b -> If (o, t, a, b, yes (), no ())))))
@@ -193,7 +193,7 @@ and stmt lp (env : env) (s : A.ty A.stmt) (k : env -> term) : term =
   | Let (x, _, e) -> exp env e (fun a -> k ((x, (a, ty_of e.a)) :: env))
   | Set ({ x = Var x; _ }, e) ->
     exp env e (fun a -> k ((x, (a, ty_of e.a)) :: List.remove_assoc x env))
-  | Set ({ x = Glob g; _ }, e) -> exp env e (fun a -> Store (ty_of e.a, S g, a, k env))
+  | Set ({ x = Glob g; _ }, e) -> exp env e (fun a -> Store (ty_of e.a, S (g, 0), a, k env))
   | Set ({ x = Mem (t, p); _ }, e) when plain p ->
     (* 番地の計算を書き込みの直前に置く。コード生成が 1 つの命令にまとめやすい *)
     exp env e (fun a -> exp env p (fun p -> Store (ty_of t, p, a, k env)))
@@ -210,7 +210,7 @@ and stmt lp (env : env) (s : A.ty A.stmt) (k : env -> term) : term =
   | Each (x, t, b) -> block lp env (Check.each !frames x t b) (fun env -> k (List.remove_assoc x (List.remove_assoc (x ^ ".left") env)))
   | Stop (t, None) when Hashtbl.mem pools t ->
     stmt lp env (Each ("stop." ^ t, t, [ Stop (t, Some { x = Var ("stop." ^ t); a = A.Ptr t }) ])) k
-  | Stop (t, None) -> Store (U16, S (t ^ ".pc"), S (t ^ ".done"), k env)
+  | Stop (t, None) -> Store (U16, S (t ^ ".pc", 0), S (t ^ ".done", 0), k env)
   | Stop (_, Some e) ->
     (* 続きの番地の上位バイトを 0 にすれば、その枠は空きになる *)
     exp env e (fun a -> let m = fresh "t" in Let (m, U16, Bin ("-", a, C 1), Store (U8, V m, C 0, k env)))
