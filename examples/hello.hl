@@ -1,0 +1,17 @@
+// MSX で文字を出す。CHPUT は BIOS の 1 文字出力。
+// clobbers(): この呼び出しはレジスタを壊さない、という宣言。
+extern fn chput(c: u8 @ a) @ 0x00a2 clobbers()
+
+fn print(s: u16) {
+  while mem[s] != 0 {
+    chput(mem[s])
+    s += 1
+  }
+}
+
+fn main() {
+  print("HELLO, HLANG!\r\n")
+  for i in 0..10 {
+    chput('0' + i)
+  }
+}

@@ -1,0 +1,41 @@
+// 手書きアセンブリと比べるためのバイトコードマシン。examples/vm.hl と同じ作りで、
+// 全部の命令を使うループを 200 回まわす。スタックはポインタで読み書きする。
+extern fn chput(c: u8 @ a) @ 0x00a2 clobbers()
+
+enum Op { LIT, ADD, SUB, DUP, EMIT, JNZ, DEC, END }
+
+data prog: u8 = [
+  LIT, 200,                    // 回数
+  // loop:
+  LIT, 'A', DUP, LIT, 1, ADD,  // 'A' と 'A' + 1
+  SUB, EMIT,                   // 引いて出す
+  DEC,                         // 回数を減らす
+  JNZ, 2,                      // 0 でなければ loop へ
+  END,
+]
+
+var stack: [u8; 16]
+
+fn run(code: u16) {
+  var p: u16 = code
+  var sp: u16 = stack            // 次に積む場所
+  loop {
+    match next(p) as Op {
+      LIT => { mem[sp] = next(p)  sp += 1 }
+      ADD => { sp -= 1  mem[sp - 1] = mem[sp - 1] + mem[sp] }
+      SUB => { sp -= 1  mem[sp - 1] = mem[sp - 1] - mem[sp] }
+      DUP => { mem[sp] = mem[sp - 1]  sp += 1 }
+      EMIT => { sp -= 1  chput(mem[sp]) }
+      JNZ => {
+        var to = next(p)
+        if mem[sp - 1] != 0 { p = code + to }
+      }
+      DEC => { mem[sp - 1] = mem[sp - 1] - 1 }
+      END => { return }
+    }
+  }
+}
+
+fn main() {
+  run(prog)
+}

@@ -1,0 +1,40 @@
+// 命令の多いバイトコードマシン。命令が多いと、match は表で飛ぶコードになる。
+extern fn chput(c: u8 @ a) @ 0x00a2 clobbers()
+
+enum Op { LIT, ADD, SUB, DUP, EMIT, JNZ, DEC, END }
+
+data prog: u8 = [
+  LIT, 5,              // 回数
+  // loop:
+  LIT, 'A', EMIT,      // A を出す
+  DEC,                 // 回数を減らす
+  JNZ, 2,              // 0 でなければ loop へ
+  LIT, '!', EMIT,
+  END,
+]
+
+var stack: [u8; 16]
+
+fn run(code: u16) {
+  var p: u16 = code
+  var sp: u8 = 0                 // スタックの深さ
+  loop {
+    match next(p) as Op {
+      LIT => { stack[sp] = next(p)  sp += 1 }
+      ADD => { sp -= 1  stack[sp - 1] = stack[sp - 1] + stack[sp] }
+      SUB => { sp -= 1  stack[sp - 1] = stack[sp - 1] - stack[sp] }
+      DUP => { stack[sp] = stack[sp - 1]  sp += 1 }
+      EMIT => { sp -= 1  chput(stack[sp]) }
+      JNZ => {
+        var to = next(p)
+        if stack[sp - 1] != 0 { p = code + to }
+      }
+      DEC => { stack[sp - 1] = stack[sp - 1] - 1 }
+      END => { return }
+    }
+  }
+}
+
+fn main() {
+  run(prog)
+}

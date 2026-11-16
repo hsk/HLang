@@ -1,0 +1,83 @@
+// MSX の BIOS と I/O ポート。import "msx.hl" で使う。使わなかった関数は ROM に入らない。
+// BIOS のルーチンは、壊すレジスタを書いていなければ「全部壊す」とみなされる。
+
+// ---- 文字 ----
+extern fn chput(c: u8 @ a) @ 0x00a2 clobbers()         // 1 文字出す
+extern fn posit(xy: u16 @ hl) @ 0x00c6                 // カーソルを動かす。上位が桁、下位が行（1 から）
+extern fn chgmod(mode: u8 @ a) @ 0x005f                // 画面モードを変える
+extern fn chgclr() @ 0x0062                            // FORCLR, BAKCLR, BDRCLR の色にする
+const FORCLR = 0xf3e9
+const BAKCLR = 0xf3ea
+const BDRCLR = 0xf3eb
+
+fn print(s: u16) { while mem[s] != 0 { chput(mem[s])  s += 1 } }
+fn locate(x: u8, y: u8) { var xy: u16 = x + 1  posit((xy << 8) + y + 1) }
+
+// ---- VDP ----
+const VDP_DATA = 0x98                                  // port[VDP_DATA] で VRAM を続けて読み書きする
+const VDP_CTRL = 0x99
+extern fn wrtvdp(v: u8 @ b, r: u8 @ c) @ 0x0047        // VDP のレジスタ r に v を書く
+extern fn rdvrm(addr: u16 @ hl) -> u8 @ 0x004a         // VRAM を 1 バイト読む
+extern fn wrtvrm(addr: u16 @ hl, v: u8 @ a) @ 0x004d   // VRAM に 1 バイト書く
+extern fn filvrm(addr: u16 @ hl, n: u16 @ bc, v: u8 @ a) @ 0x0056      // VRAM を同じ値で埋める
+extern fn ldirvm(src: u16 @ hl, dst: u16 @ de, n: u16 @ bc) @ 0x005c   // メモリから VRAM へ写す
+
+// VRAM の書き込み位置を決める。続けて port[VDP_DATA] = v と書けば、1 バイトずつ進む。
+fn vram_at(addr: u16) {
+  di()
+  port[VDP_CTRL] = addr as u8
+  port[VDP_CTRL] = ((addr >> 8) as u8) | 0x40
+  ei()
+}
+
+// ---- スプライト（SCREEN 1 と 2 の配置） ----
+const SPR_ATTR = 0x1b00                                // スプライトの位置や色。1 枚 4 バイト
+const SPR_PAT = 0x3800                                 // スプライトの絵。8x8 なら 1 つ 8 バイト
+const SPR_OFF = 200                                    // この y に置くと画面の外
+
+// n 枚目のスプライトを (x, y) に、絵 pat、色 color で置く
+fn sprite(n: u8, x: u8, y: u8, pat: u8, color: u8) {
+  var at: u16 = n
+  vram_at(SPR_ATTR + (at << 2))
+  port[VDP_DATA] = y
+  port[VDP_DATA] = x
+  port[VDP_DATA] = pat
+  port[VDP_DATA] = color
+}
+
+// 8x8 の絵を pat 番に登録する。data は 8 バイトの表
+fn sprite_pattern(pat: u8, data_: u16) {
+  var at: u16 = pat
+  ldirvm(data_, SPR_PAT + (at << 3), 8)
+}
+
+// ---- PSG ----
+extern fn gicini() @ 0x0090                            // PSG を初期化する
+extern fn wrtpsg(r: u8 @ a, v: u8 @ e) @ 0x0093        // PSG のレジスタ r に v を書く
+extern fn rdpsg(r: u8 @ a) -> u8 @ 0x0096
+
+fn tone(ch: u8, period: u16) {                         // ch: 0〜2。period: 111861 / 周波数
+  wrtpsg(ch << 1, period as u8)
+  wrtpsg((ch << 1) + 1, (period >> 8) as u8)
+}
+fn volume(ch: u8, v: u8) { wrtpsg(ch + 8, v) }         // v: 0〜15
+
+// ---- 入力 ----
+extern fn gtstck(port_: u8 @ a) -> u8 @ 0x00d5         // 0: カーソルキー、1, 2: ジョイスティック。向きは 0〜8
+extern fn gttrig(n: u8 @ a) -> u8 @ 0x00d8             // 0: スペースキー。押されていれば 255
+extern fn snsmat(row: u8 @ a) -> u8 @ 0x0141           // キーボードの行を読む
+
+// ---- 時間 ----
+const JIFFY = 0xfc9e                                   // 1/60 秒ごとに増える 16bit の数
+const H_TIMI = 0xfd9f                                  // 画面の割り込みごとに呼ばれるフック
+
+fn vsync() { ei()  halt() }                            // 次の割り込み（1/60 秒ごと）まで待つ
+
+// 画面の割り込みごとに f を呼ばせる。f は &関数名。
+// 割り込みから呼ばれる関数と、普段の処理から呼ばれる関数は、分けておくこと（変数の置き場所が固定なので）。
+fn on_vsync(f: u16) {
+  di()
+  mem[H_TIMI] = 0xc3                                   // jp f
+  mem16[H_TIMI + 1] = f
+  ei()
+}

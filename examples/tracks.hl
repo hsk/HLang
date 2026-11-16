@@ -1,0 +1,41 @@
+// 3 つのトラックを同時に鳴らす。トラックは同じタスクを 3 個動かしたもの（プール）。
+// 個体ごとに、読み取り位置 p とチャンネル ch を別々に持つ。
+import "msx.hl"
+
+enum Cmd { NOTE, REST, AGAIN }                         // NOTE 音 長さ / REST 長さ / AGAIN
+
+// ド レ ミ ファ ソ ラ シ ド の周期
+data pitch: u16 = [ 428, 381, 339, 320, 285, 254, 226, 214 ]
+
+data melody: u8 = [ NOTE, 0, 12,  NOTE, 2, 12,  NOTE, 4, 12,  NOTE, 7, 24,  REST, 12,  AGAIN ]
+data harmony: u8 = [ NOTE, 2, 24,  NOTE, 4, 24,  REST, 24,  AGAIN ]
+data bass: u8 = [ NOTE, 0, 48,  REST, 6,  NOTE, 4, 18,  AGAIN ]
+
+task track(ch: u8, start: u16) pool 3 {
+  var p: u16 = start
+  loop {
+    match next(p) as Cmd {
+      NOTE => {
+        tone(ch, pitch[next(p)])
+        volume(ch, 12)
+        wait next(p)
+      }
+      REST => { volume(ch, 0)  wait next(p) }
+      AGAIN => { p = start }
+    }
+  }
+}
+
+fn tick() { resume track }                             // 画面の割り込みごとに、全部のトラックを 1 歩進める
+
+fn main() {
+  chgmod(1)
+  gicini()
+  wrtpsg(7, 0xb8)
+  spawn track(0, melody)
+  spawn track(1, harmony)
+  spawn track(2, bass)
+  on_vsync(&tick)
+  print("3 TRACKS")
+  loop { vsync() }
+}

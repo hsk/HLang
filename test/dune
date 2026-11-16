@@ -1,0 +1,27 @@
+(tests
+ (names t_z80 t_asm t_lang)
+ (modules t_z80 t_asm t_lang)
+ (libraries z80 hlang))
+
+; 命令網羅テスト zexdoc / zexall を走らせる。数分かかるので dune test には入れない。
+;   dune exec test/zex.exe -- path/to/zexall.com
+(executable
+ (name zex)
+ (modules zex)
+ (libraries z80))
+
+(executable
+ (name tstates)
+ (modules tstates)
+ (libraries z80 hlang))
+
+(executable
+ (name runbin)
+ (modules runbin)
+ (libraries z80 hlang))
+
+; match の出し方を測る。  dune exec test/sw.exe
+(executable
+ (name sw)
+ (modules sw)
+ (libraries z80 hlang))

@@ -1,0 +1,45 @@
+// HL でメモリを歩く例。
+extern fn chput(c: u8 @ a) @ 0x00a2 clobbers()
+
+// p から n バイトの合計
+fn sum(p: u16, n: u8) -> u8 {
+  var acc: u8 = 0
+  while n != 0 {
+    acc += mem[p]
+    p += 1
+    n -= 1
+  }
+  return acc
+}
+
+// p から n バイトを v で埋める
+fn fill(p: u16, n: u8, v: u8) {
+  while n != 0 {
+    mem[p] = v
+    p += 1
+    n -= 1
+  }
+}
+
+// src から dst へ n バイト写す
+fn copy(dst: u16, src: u16, n: u16) {
+  while n != 0 {
+    mem[dst] = mem[src]
+    dst += 1
+    src += 1
+    n -= 1
+  }
+}
+
+fn hex(v: u8) {
+  var d: u8 = v >> 4
+  if d < 10 { chput('0' + d) } else { chput('A' - 10 + d) }
+  d = v & 15
+  if d < 10 { chput('0' + d) } else { chput('A' - 10 + d) }
+}
+
+fn main() {
+  fill(0xc000, 16, 3)
+  copy(0xc010, 0xc000, 16)
+  hex(sum(0xc000, 32))
+}

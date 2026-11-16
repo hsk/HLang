@@ -1,0 +1,61 @@
+// 曲を鳴らしながら、画面に文字を流す。
+// 曲はバイトコードで書き、task がそれを読んで PSG を鳴らす。wait と書けば、その間は他の処理が動く。
+import "msx.hl"
+
+enum Cmd { NOTE, REST, AGAIN }                         // NOTE 音 長さ / REST 長さ / AGAIN
+
+// ド レ ミ ファ ソ ラ シ ド の周期
+data pitch: u16 = [ 428, 381, 339, 320, 285, 254, 226, 214 ]
+
+data song: u8 = [
+  NOTE, 0, 12,  NOTE, 2, 12,  NOTE, 4, 12,  REST, 6,
+  NOTE, 4, 12,  NOTE, 2, 12,  NOTE, 0, 24,
+  NOTE, 7, 6,   NOTE, 4, 6,   NOTE, 7, 6,   NOTE, 4, 6,   REST, 12,
+  AGAIN,
+]
+
+task music() {
+  var p: u16 = song
+  loop {
+    match next(p) as Cmd {
+      NOTE => {
+        tone(0, pitch[next(p)])
+        volume(0, 12)
+        wait next(p)                                   // 長さの分だけ休む。その間も画面は動く
+      }
+      REST => { volume(0, 0)  wait next(p) }
+      AGAIN => { p = song }
+    }
+  }
+}
+
+data text: u8 = "HLANG "
+
+task banner() {
+  var x: u8 = 0
+  loop {
+    for i in 0..6 {
+      locate(x, 10)
+      chput(text[i])
+      x += 1
+      if x == 30 { x = 0 }
+      wait 8
+    }
+  }
+}
+
+// 画面の割り込みごとに呼ばれる。曲は割り込みで進むので、普段の処理が重くても遅れない。
+fn tick() { resume music }
+
+fn main() {
+  chgmod(1)
+  gicini()
+  wrtpsg(7, 0xb8)                                      // 3 つの音のチャンネルを有効に
+  spawn music()
+  spawn banner()
+  on_vsync(&tick)
+  loop {
+    vsync()
+    resume banner
+  }
+}

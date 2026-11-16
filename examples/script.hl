@@ -1,0 +1,38 @@
+// 小さなバイトコードマシン。命令の並び（data）を読んで実行する。
+extern fn chput(c: u8 @ a) @ 0x00a2 clobbers()
+
+// 命令の一覧。match はこの全部を扱っていないとコンパイルエラーになる。
+enum Op {
+  PUT,     // PUT c    : 文字 c を出す
+  REP,     // REP n c  : 文字 c を n 回出す
+  NL,      // NL       : 改行
+  END,     // END      : 終わり
+}
+
+data script: u8 = [
+  PUT, 'H', PUT, 'L', REP, 3, '!', NL,
+  REP, 5, '*', NL,
+  END,
+]
+
+fn run(p: u16) {
+  loop {
+    match next(p) as Op {
+      PUT => { chput(next(p)) }
+      REP => {
+        var n = next(p)
+        var c = next(p)
+        while n != 0 {
+          chput(c)
+          n -= 1
+        }
+      }
+      NL => { chput(13) chput(10) }
+      END => { return }
+    }
+  }
+}
+
+fn main() {
+  run(script)
+}

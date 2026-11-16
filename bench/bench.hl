@@ -1,0 +1,44 @@
+// SDCC と比べるための小さな計測用プログラム。結果は 0xc200 に置く。
+fn fill(p: u16, n: u8, v: u8) {
+  while n != 0 {
+    mem[p] = v
+    p += 1
+    n -= 1
+  }
+}
+
+fn copy(dst: u16, src: u16, n: u16) {
+  while n != 0 {
+    mem[dst] = mem[src]
+    dst += 1
+    src += 1
+    n -= 1
+  }
+}
+
+fn sum(p: u16, n: u8) -> u8 {
+  var acc: u8 = 0
+  while n != 0 {
+    acc += mem[p]
+    p += 1
+    n -= 1
+  }
+  return acc
+}
+
+// 0 でないバイトの数を 16bit で数える
+fn count(p: u16, end: u16) -> u16 {
+  var c: u16 = 0
+  while p < end {
+    if mem[p] != 0 { c += 1 }
+    p += 1
+  }
+  return c
+}
+
+fn main() {
+  fill(0xc000, 200, 3)
+  copy(0xc100, 0xc000, 200)
+  mem[0xc200] = sum(0xc100, 200)
+  mem16[0xc202] = count(0xc000, 0xc200)
+}
