@@ -573,9 +573,15 @@ let make seed =
     let leaf () = pick (of_ty vars t) in
     let lit () = string_of_int (int (if t = "u8" then 256 else 65536)) in
     let sub () = if int 3 = 0 then lit () else num t vars (d - 1) in
+    (* 構造体のフィールド: 大域変数、配列の要素、ポインタの変数のどれかから読む *)
+    let place () =
+      match of_ty vars "ptr" with
+      | l when l <> [] && int 2 = 0 -> pick l
+      | _ -> if int 2 = 0 then "s1" else Printf.sprintf "ss[(%s & 3)]" (num "u8" vars (d - 1))
+    in
     if d <= 0 then leaf ()
     else
-      match int 12 with
+      match int 17 with
       | 0 | 1 -> leaf ()
       | 2 | 3 | 4 -> Printf.sprintf "(%s %s %s)" (num t vars (d - 1)) (pick [ "+"; "-"; "&"; "|"; "^" ]) (sub ())
       | 5 -> Printf.sprintf "(%s %s %d)" (num t vars (d - 1)) (pick [ "<<"; ">>" ]) (int (if t = "u8" then 9 else 17) land 15)
@@ -585,6 +591,15 @@ let make seed =
       | 9 when t = "u8" && int 2 = 0 ->
         Printf.sprintf "%s[(%s & 7)]" (pick [ "tbl"; "arr" ]) (num "u8" vars (d - 1))
       | 9 -> Printf.sprintf "(%s as %s)" (cond vars (d - 1)) t
+      | 12 -> Printf.sprintf "(%s * %d)" (num t vars (d - 1)) (int 41)
+      | 13 -> Printf.sprintf "(%s %s %s)" (num t vars (d - 1)) (pick [ "/"; "%" ]) (sub ())
+      | 14 -> Printf.sprintf "%s(%s)" (if t = "u8" then "l8" else "l16") (num "u8" vars (d - 1))
+      | 15 -> Printf.sprintf "%s.%s" (place ()) (if t = "u8" then pick [ "a"; "b" ] else "w")
+      | 16 ->
+        (* 符号付きとして計算して、ビットはそのまま戻す *)
+        let s = if t = "u8" then "i8" else "i16" in
+        if int 2 = 0 then Printf.sprintf "(((%s as %s) >> %d) as %s)" (num t vars (d - 1)) s (int (if t = "u8" then 9 else 17) land 15) t
+        else Printf.sprintf "(((%s as %s) %s (%s as %s)) as %s)" (num t vars (d - 1)) s (pick [ "/"; "%" ]) (num t vars (d - 1)) s t
       | _ ->
         (match List.filter (fun (_, _, r) -> r = t) !fns with
          | [] -> leaf ()
@@ -594,10 +609,14 @@ let make seed =
   and cond vars d =
     if d <= 0 then pick (of_ty vars "bool")
     else
-      match int 8 with
+      match int 9 with
       | 0 -> pick (of_ty vars "bool")
       | 1 -> Printf.sprintf "(%s %s %s)" (cond vars (d - 1)) (pick [ "&&"; "||" ]) (cond vars (d - 1))
       | 2 -> "!" ^ cond vars (d - 1)
+      | 3 ->
+        let t = pick [ "u8"; "u16" ] in
+        let s = if t = "u8" then "i8" else "i16" in
+        Printf.sprintf "((%s as %s) %s (%s as %s))" (num t vars (d - 1)) s (pick [ "<"; "<="; ">"; ">=" ]) (num t vars (d - 1)) s
       | _ ->
         let t = pick [ "u8"; "u8"; "u16" ] in
         Printf.sprintf "(%s %s %s)" (num t vars (d - 1)) (pick [ "=="; "!="; "<"; "<="; ">"; ">=" ])
@@ -609,7 +628,18 @@ let make seed =
     for _ = 1 to 2 + int 5 do
       let v = !vars in
       let writable = List.filter (fun (_, _, w) -> w) v in
-      match int 14 with
+      match int 17 with
+      | 14 ->
+        let at = match of_ty v "ptr" with
+          | l when l <> [] && int 2 = 0 -> pick l
+          | _ -> if int 2 = 0 then "s1" else Printf.sprintf "ss[(%s & 3)]" (num "u8" v 2)
+        in
+        if int 3 = 0 then p "%s%s.w = %s\n" ind at (num "u16" v 2)
+        else p "%s%s.%s %s %s\n" ind at (pick [ "a"; "b" ]) (pick [ "="; "+="; "^=" ]) (num "u8" v 2)
+      | 15 ->
+        let x = fresh () in
+        p "%svar %s: *S = %s\n" ind x (if int 3 = 0 then "s1" else Printf.sprintf "ss[(%s & 3)]" (num "u8" v 2));
+        vars := (x, "ptr", false) :: v
       | 0 | 1 ->
         let x = fresh () and t = pick [ "u8"; "u8"; "u16"; "bool" ] in
         p "%svar %s: %s = %s\n" ind x t (any v 3 t);
@@ -660,6 +690,9 @@ let make seed =
   let globals = [ "g8", "u8", true; "g16", "u16", true; "gb", "bool", true ] in
   p "var g8: u8 = %d\nvar g16: u16 = %d\nvar gb: bool\n" (int 256) (int 65536);
   p "data tbl: u8 = [%s]\nvar arr: [u8; 8]\n" (String.concat ", " (List.init 8 (fun _ -> string_of_int (int 256))));
+  p "struct S { a: u8, w: u16, b: u8 }\nvar s1: S\nvar ss: [S; 4]\n";
+  p "lut fn l8(x: u8) -> u8 { return (x * %d) ^ (x >> %d) }\n" (int 30) (int 8);
+  p "lut fn l16(x: u8) -> u16 { var w: u16 = x  return w * %d + %d }\n" (int 300) (int 1000);
   for k = 0 to int 3 do
     let name = Printf.sprintf "f%d" k in
     let ps = List.init (int 3) (fun _ -> pick [ "u8"; "u16"; "bool" ]) in
@@ -678,7 +711,8 @@ let make seed =
   p "fn main() {\n  var a: u8 = %d\n  var w: u16 = %d\n  var t: bool = true\n" (int 256) (int 65536);
   block "  " ([ "a", "u8", true; "w", "u16", true; "t", "bool", true ] @ globals) 3 false None;
   p "  puth(a) puth(w) puth(t as u8) puth(g8) puth(g16) puth(gb as u8)\n";
-  p "  for i in 0..8 { puth(mem16[0xc000 + i * 32]) puth(arr[i]) }\n}\n";
+  p "  for i in 0..8 { puth(mem16[0xc000 + i * 32]) puth(arr[i]) }\n";
+  p "  puth(s1.a) puth(s1.w) puth(s1.b)\n  for i in 0..4 { var e = ss[i]  puth(e.a) puth(e.w) puth(e.b) }\n}\n";
   Buffer.contents b
 
 (* 乱数で作る match。値の並び（続き番号、とびとび、同じ行き先）をいろいろにして、0〜255 を全部流す。 *)
