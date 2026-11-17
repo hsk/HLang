@@ -2,7 +2,7 @@
 
 hlang のコンパイラは OCaml だけで書かれていて、OS の機能を呼んでいません。シェルスクリプトも POSIX の `sh` です。そのため Windows では WSL2（Ubuntu）の中で、Linux と同じ手順で動かします。Windows のネイティブ（PowerShell）で使う場合は [windows.md](windows.md) です。
 
-> この手順は macOS で作った構成から書いたもので、WSL 上ではまだ通して確かめていません。確かめた結果は、末尾の「確認欄」に書き込んでください。
+> この手順は macOS で作った構成から書いたもので、WSL2（Ubuntu 26.04）で `dune build`、`dune test`、`hello.hl --run` が通ることを確かめました（末尾の「確認欄」）。openMSX のヘッドレス確認（MSX）も通りました。WSLg のウィンドウ表示（`make game`）も動きました。SMS（MAME）は未確認です。確かめた結果は、確認欄に書き足してください。
 
 ## 1. WSL を入れる
 
@@ -16,11 +16,13 @@ wsl --install -d Ubuntu
 
 ## 2. 道具を入れる
 
+Ubuntu を入れた直後の WSL には、C コンパイラ（`gcc`）も `make` も `unzip` も入っていません（Ubuntu 26.04 で確かめました）。OCaml をビルドするのに `gcc` が要るので、まず `apt` で入れます。`sudo` はパスワードを聞くので、**自分で端末に打ってください**（Claude Code などの自動化ツールからは実行できません）。
+
 ```sh
 sudo apt update
-sudo apt install -y git build-essential opam
+sudo apt install -y git build-essential opam unzip bubblewrap
 opam init -y --bare
-opam switch create hlang 5.2.0        # OCaml 5 以上が要る（タスクの参照インタプリタが Effect を使う）
+opam switch create hlang 5.2.0        # OCaml 5 以上が要る（タスクの参照インタプリタが Effect を使う）。初回だけ、コンパイラ本体をビルドするので数分かかる
 eval $(opam env)
 opam install -y dune
 ```
@@ -51,6 +53,10 @@ dune exec bin/hlc.exe -- examples/sms_game.hl -sms    # examples/sms_game.sms �
 sudo apt install -y openmsx mame
 ```
 
+`sudo` は自分で端末に打ちます。入れたあとは、先に `eval $(opam env --switch=hlang)` を実行してから `cd examples && make hello.rom game.rom tracks.rom` で ROM を作ります。
+
+`tools/msx-screen.sh` は、WSL では `ALSA lib ... open /dev/snd/seq failed` と `Could not open sequencer` を出しますが、MIDI の音源が無いだけで、画面の文字は正しく読めます。無視して構いません。
+
 - **画面を開いて動かす**：Windows 11（と、更新した Windows 10）には WSLg が入っていて、Linux の GUI アプリがそのままウィンドウで開きます。`cd examples && make game`（MSX）、`make sms`（SMS）。音が出ない・遅いときは、ヘッドレスで確かめる方を使ってください。
 - **ヘッドレスで確かめる**：`tools/msx-screen.sh examples/hello.rom`（openMSX で起動して画面の文字を読む）、`tools/sms-screen.sh examples/sms_game.sms`（MAME で画面を PNG に撮る）。どちらも画面を開きません。
 
@@ -71,6 +77,7 @@ Ubuntu の `sdcc` は、README に書いた 4.6 とは版が違うかもしれ�
 | 症状 | 原因と直し方 |
 | --- | --- |
 | `bad interpreter: /bin/sh^M` | 改行が CRLF になっている。Windows 側の Git で clone したのが原因。WSL の中で clone し直す（リポジトリには `.gitattributes` で LF を指定してある） |
+| `opam` や `gcc` が見つからない（`command not found`） | 手順 2 の `sudo apt install` をまだ実行していない。パスワードを聞かれるので、自分で打つ |
 | ビルドが遅い | `/mnt/c` に置いている。`~/` の下へ移す |
 | `Effect` が見つからない | OCaml が 4.x。`opam switch create hlang 5.2.0` で 5 以上にする |
 | MAME や openMSX のウィンドウが開かない | `wsl --update` で WSLg を更新して `wsl --shutdown`。それでも出なければ、ヘッドレスの 2 つのスクリプトを使う |
@@ -82,4 +89,4 @@ Ubuntu の `sdcc` は、README に書いた 4.6 とは版が違うかもしれ�
 
 | 日付 | 環境 | `dune test` | MSX の画面 | SMS の画面 | 備考 |
 | --- | --- | --- | --- | --- | --- |
-| | | | | | |
+| 2026-11-17 | WSL2 / Ubuntu 26.04、OCaml 5.2.0、dune 3.25.0 | 通った（`HL_RANDOM=20`） | `hello.rom`（`HELLO, HLANG!`）、`game.rom`（`SCORE 00`）、`tracks.rom`（`3 TRACKS`）をヘッドレスで確認。`make game` のウィンドウ表示も動いた（利用者の確認） | 未確認 | `opam init` は `--disable-sandboxing` なしで通った（bubblewrap を入れた） |

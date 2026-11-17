@@ -33,6 +33,12 @@ CI は `ocaml/setup-ocaml` で OCaml 5.2 を入れて、`opam install dune` し�
 
 `ocaml -version` が 5.x、`dune --version` が 3.0 以上であることを確かめます。
 
+## 1.5 自分でビルドしない（GitHub Actions の成果物を使う）
+
+GitHub の「Actions」タブで、最新の ci の実行を開き、下の「Artifacts」から `hlang-windows-latest` を取ります。`hlc.exe`、`lib/`、`examples/` が入っています。展開して、そのフォルダで `.\hlc.exe examples\game.hl` を実行します。`examples\game.rom` ができます。`hlc.exe` は `lib/` を隣から探すので、フォルダの中身は動かさないでください。
+
+ブラウザからダウンロードしてください。Ubuntu の `gh`（2.46）の `gh run download` は、`would result in path traversal` で失敗することがあります（zip 自体は正常です）。
+
 ## 2. ビルドと実行
 
 ```powershell
@@ -73,3 +79,4 @@ MSX の画面の文字を読む `tools/msx-screen.sh` は、まだ PowerShell �
 | 日付 | 環境 | `dune build` | `dune test` | ROM | 備考 |
 | --- | --- | --- | --- | --- | --- |
 | 2026-11-17 | GitHub Actions `windows-latest`、OCaml 5.2（`setup-ocaml`） | 成功 | 成功（`HL_RANDOM=30`） | `game.rom` と `sms_game.sms` を作れた | 手元の Windows では未確認。CI の実行: 44051869821 |
+| 2026-11-17 | 手元の Windows（PowerShell）。CI の成果物 `hlang-windows-latest`（実行 44104319124）の `hlc.exe` | （ビルドは CI） | （CI で成功） | `.\hlc .\examples\game.hl` で `game.rom`（1477 バイト）ができた | WSL なし・OCaml なしで動いた。利用者の確認 |
