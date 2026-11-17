@@ -2,7 +2,7 @@
 
 PowerShell だけで、コンパイラのビルドから ROM 作り、テストまでできます。WSL を使う場合は [wsl.md](wsl.md) です。
 
-> macOS で作った構成から書いた手順です。Windows での通しは、GitHub Actions（[.github/workflows/ci.yml](../.github/workflows/ci.yml)）の `windows-latest` が確かめます。このリポジトリを push すると走り、結果が出ます。手元で確かめた結果は、末尾の「確認欄」に書き込んでください。
+> macOS で作った構成から書いた手順です。ビルドとテストと ROM 作りは、GitHub Actions（[.github/workflows/ci.yml](../.github/workflows/ci.yml)）の `windows-latest` で通ることを確かめました。この文書の PowerShell のスクリプト（`build.ps1`、`sms-screen.ps1`）と、エミュレータを使う部分は、まだ実行していません。手元で確かめた結果は、末尾の「確認欄」に書き込んでください。
 
 ## なぜ動くか
 
@@ -72,4 +72,4 @@ MSX の画面の文字を読む `tools/msx-screen.sh` は、まだ PowerShell �
 
 | 日付 | 環境 | `dune build` | `dune test` | ROM | 備考 |
 | --- | --- | --- | --- | --- | --- |
-| | | | | | |
+| 2026-11-17 | GitHub Actions `windows-latest`、OCaml 5.2（`setup-ocaml`） | 成功 | 成功（`HL_RANDOM=30`） | `game.rom` と `sms_game.sms` を作れた | 手元の Windows では未確認。CI の実行: 44051869821 |
