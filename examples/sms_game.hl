@@ -1,0 +1,125 @@
+// examples/game.hl のセガ・マスターシステム版。パッドの左右で動き、ボタン 1 で撃つ。
+//   hlc sms_game.hl -sms   →   sms_game.sms
+// タスクと当たり判定は MSX 版と同じ。違うのは、絵と色の登録、入力、点数の出し方（文字がないので数字のタイル）。
+import "sms.hl"
+
+data ship: u8 = [ 0x18, 0x18, 0x3c, 0x7e, 0xff, 0xff, 0x66, 0x00 ]
+data alien: u8 = [ 0x42, 0x24, 0x7e, 0xdb, 0xff, 0x7e, 0x24, 0x42 ]
+data bolt: u8 = [ 0x18, 0x18, 0x18, 0x18, 0x00, 0x00, 0x00, 0x00 ]
+data digits: u8 = [
+  0x3c, 0x66, 0x6e, 0x76, 0x66, 0x66, 0x3c, 0x00,   0x18, 0x38, 0x18, 0x18, 0x18, 0x18, 0x7e, 0x00,
+  0x3c, 0x66, 0x06, 0x0c, 0x30, 0x60, 0x7e, 0x00,   0x3c, 0x66, 0x06, 0x1c, 0x06, 0x66, 0x3c, 0x00,
+  0x0c, 0x1c, 0x3c, 0x6c, 0x7e, 0x0c, 0x0c, 0x00,   0x7e, 0x60, 0x7c, 0x06, 0x06, 0x66, 0x3c, 0x00,
+  0x3c, 0x66, 0x60, 0x7c, 0x66, 0x66, 0x3c, 0x00,   0x7e, 0x66, 0x0c, 0x18, 0x18, 0x18, 0x18, 0x00,
+  0x3c, 0x66, 0x66, 0x3c, 0x66, 0x66, 0x3c, 0x00,   0x3c, 0x66, 0x66, 0x3e, 0x06, 0x66, 0x3c, 0x00,
+]
+
+var px: u8 = 120                                       // 自機の x
+var score: u8
+var fired: u8                                          // 撃った弾の数（スプライトの番号を順に使う）
+var cool: u8                                           // 次に撃てるまでのフレーム数
+
+// ---- 弾: 3 発まで。上へ飛び、画面の上まで行けば消える。n はスプライトの番号 ----
+task shot(n: u8, x: u8, y: u8) pool 3 {
+  while y > 8 {
+    y -= 4
+    sprite(n, x, y, 2)
+    yield
+  }
+  sprite(n, 0, SPR_OFF, 2)
+}
+
+// ---- 敵: 左右に揺れながら降りる。dx は符号付きで、端で向きを変える ----
+task zako(n: u8, x: u8, y: u8, dx: i8) pool 4 {
+  while y < 176 {
+    sprite(n, x, y, 1)
+    x += dx
+    if x < 16 || x > 224 { dx = -dx }
+    y += 1
+    yield
+  }
+  sprite(n, 0, SPR_OFF, 1)
+}
+
+// ---- 当たり判定: 動いている弾と敵を全部突き合わせる。当たったら両方を止める ----
+fn collide() {
+  for b in shot {
+    for e in zako {
+      if b.x < e.x + 8 && e.x < b.x + 8 && b.y < e.y + 8 && e.y < b.y + 8 {
+        score += 1
+        sprite(b.n, 0, SPR_OFF, 2)
+        sprite(e.n, 0, SPR_OFF, 1)
+        stop b
+        stop e
+        break
+      }
+    }
+  }
+}
+
+// ---- 敵を出す係: 48 フレームごとに 1 匹 ----
+data lane: u8 = [ 40, 200, 120, 80, 160, 24, 216, 104 ]
+
+task wave() {
+  var i: u8 = 0
+  loop {
+    var dx: i8 = 1
+    if i & 1 != 0 { dx = -1 }
+    spawn zako(4 + (i & 3), lane[i & 7], 0, dx)
+    i += 1
+    wait 48
+  }
+}
+
+// ---- 曲: 2 つのトラック。割り込みで進む ----
+enum Cmd { NOTE, REST, AGAIN }
+data pitch: u16 = [ 428, 381, 339, 320, 285, 254, 226, 214 ]
+data melody: u8 = [ NOTE, 0, 12,  NOTE, 4, 12,  NOTE, 7, 12,  NOTE, 4, 12,  NOTE, 2, 12,  NOTE, 5, 12,  REST, 24,  AGAIN ]
+data bass: u8 = [ NOTE, 0, 48,  NOTE, 2, 48,  AGAIN ]
+
+task track(ch: u8, start: u16) pool 2 {
+  var p: u16 = start
+  loop {
+    match next(p) as Cmd {
+      NOTE => { tone(ch, pitch[next(p)])  volume(ch, 10)  wait next(p) }
+      REST => { volume(ch, 0)  wait next(p) }
+      AGAIN => { p = start }
+    }
+  }
+}
+
+fn tick() { resume track }
+
+fn main() {
+  screen()
+  palette(15, 0x3f)                                    // 数字は白
+  palette(16 + 15, 0x3f)                               // 自機と弾は白
+  palette(16 + 9, 0x03)                                // 敵は赤
+  tiles('0', digits, 10, 15)
+  sprite_pattern(0, ship, 15)
+  sprite_pattern(1, alien, 9)
+  sprite_pattern(2, bolt, 15)
+  spawn track(0, melody)
+  spawn track(1, bass)
+  on_vsync(&tick)
+  spawn wave()
+  loop {
+    vsync()
+    var d = pad()
+    if d & PAD_RIGHT != 0 && px < 240 { px += 2 }
+    if d & PAD_LEFT != 0 && px > 2 { px -= 2 }
+    sprite(0, px, 168, 0)
+    if cool != 0 { cool -= 1 }
+    if d & PAD_1 != 0 && cool == 0 {
+      spawn shot(1 + fired % 3, px, 160)
+      fired += 1
+      cool = 12
+    }
+    resume shot
+    resume zako
+    collide()
+    resume wave
+    put(1, 1, '0' + score / 10 % 10)
+    put(2, 1, '0' + score % 10)
+  }
+}

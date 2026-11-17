@@ -5,16 +5,18 @@
      hlc file.hl --list     番地と機械語つきの一覧を表示
      hlc file.hl --run      エミュレータで走らせ、MSX の文字出力 (CHPUT) を表示
      hlc file.hl --report   関数ごとの大きさ、呼び出し規約、時間の上限、RAM の使い道を表示
-     -O0 を付けると最適化しない（変数をすべてメモリに置く） *)
+     -O0 を付けると最適化しない（変数をすべてメモリに置く）
+     -sms を付けると、セガ・マスターシステムの ROM（file.sms）を作る *)
 
 open Hlang
 
 let () =
-  let file = ref "" and mode = ref "rom" and opt = ref true in
+  let file = ref "" and mode = ref "rom" and opt = ref true and target = ref msx in
   Array.iteri
     (fun i a ->
       if i > 0 then
         if a = "-O0" then opt := false
+        else if a = "-sms" then target := sms
         else if String.length a > 2 && String.sub a 0 2 = "--" then mode := String.sub a 2 (String.length a - 2)
         else file := a)
     Sys.argv;
@@ -34,7 +36,7 @@ let () =
     | Some p -> slurp p
     | None -> raise (Ast.Error (0, "import するファイルがない: " ^ f))
   in
-  match compile ~opt:!opt ~read (slurp !file) with
+  match compile ~target:!target ~opt:!opt ~read (slurp !file) with
   | exception Ast.Error (line, msg) ->
     let f, line = where line in
     Printf.eprintf "%s:%d: %s\n" (if f = "" then !file else f) line msg;
@@ -80,7 +82,7 @@ let () =
        in
        Printf.printf "\n[%d T ステート, %d バイト]\n" s.t (String.length r.bin)
      | _ ->
-       let out = Filename.remove_extension !file ^ ".rom" in
+       let out = Filename.remove_extension !file ^ (if !target == sms then ".sms" else ".rom") in
        let oc = open_out_bin out in
        output_string oc (rom r);
        close_out oc;

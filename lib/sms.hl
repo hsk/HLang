@@ -1,0 +1,121 @@
+// セガ・マスターシステムの VDP、PSG、パッド。import "sms.hl" で使い、hlc file.hl -sms でコンパイルする。
+// BIOS はないので、全部ポートを直接たたく。使わなかった関数は ROM に入らない。
+
+const VDP_DATA = 0xbe                                  // port[VDP_DATA] で VRAM を続けて読み書きする
+const VDP_CTRL = 0xbf
+const PSG = 0x7f
+const PAD = 0xdc
+const IRQ_HOOK = 0xdff8                                // 画面の割り込みごとに呼ばれる 3 バイト。起動時は ret
+
+// ---- VDP ----
+const NAMES = 0x3800                                   // 背景のタイルの並び。32 x 24 マス、1 マス 2 バイト
+const SPR_ATTR = 0x3f00                                // スプライトの位置。先頭 64 バイトが y、0x80 から (x, 絵) の組
+const SPR_OFF = 0xe0                                   // この y に置くと画面の外（0xd0 は「ここで終わり」の印なので使わない）
+
+fn vdp_reg(r: u8, v: u8) { di()  port[VDP_CTRL] = v  port[VDP_CTRL] = r | 0x80  ei() }
+
+// VRAM の書き込み位置を決める。続けて port[VDP_DATA] = v と書けば、1 バイトずつ進む。
+fn vram_at(addr: u16) {
+  di()
+  port[VDP_CTRL] = addr as u8
+  port[VDP_CTRL] = ((addr >> 8) as u8) | 0x40
+  ei()
+}
+
+// 色を決める。i: 0〜15 が背景、16〜31 がスプライト。rgb: 下から赤・緑・青が 2bit ずつ
+fn palette(i: u8, rgb: u8) {
+  di()
+  port[VDP_CTRL] = i
+  port[VDP_CTRL] = 0xc0
+  port[VDP_DATA] = rgb
+  ei()
+}
+
+// 画面を初めの状態にする: モード 4、VRAM を空に、スプライトを画面の外へ、音を止める。最後に画面を出す。
+// レジスタ 3 と 4 は使わないが、初代の VDP（マーク III と初期の本体）では全ビットを 1 にしておかないと、
+// タイルの番地の一部が 0 に固定されて、絵や色が欠ける。
+data vdp_init: u8 = [ 0x04, 0x80,  0x00, 0x81,  0xff, 0x82,  0xff, 0x83,  0xff, 0x84,  0xff, 0x85,  0xff, 0x86,
+                      0x00, 0x87,  0x00, 0x88,  0x00, 0x89,  0xff, 0x8a ]
+fn screen() {
+  outs(VDP_CTRL, vdp_init, 22)
+  vram_at(0)
+  var n: u16 = 0x4000
+  while n != 0 { port[VDP_DATA] = 0  n -= 1 }
+  vram_at(SPR_ATTR)
+  for i in 0..64 { port[VDP_DATA] = SPR_OFF }
+  port[PSG] = 0x9f  port[PSG] = 0xbf  port[PSG] = 0xdf  port[PSG] = 0xff
+  vdp_reg(1, 0x60)                                     // 画面を出す。画面の割り込みを起こす
+}
+
+// 8x8 の 1 色の絵（1 つ 8 バイト）を n 個、タイル first 番から登録する。色は color（0〜15）。
+// VRAM では 1 行が 4 バイト（色の番号のビットごとに 1 バイト）なので、絵のバイトを色のビットに合わせて配る。
+fn tiles(first: u16, data_: u16, n: u8, color: u8) {
+  vram_at(first << 5)
+  var p = data_
+  var left: u8 = n << 3                                // 行の数（32 個まで）
+  while left != 0 {
+    var b = mem[p]
+    p += 1
+    var c = color
+    for plane in 0..4 {
+      if c & 1 != 0 { port[VDP_DATA] = b } else { port[VDP_DATA] = 0 }
+      c = c >> 1
+    }
+    left -= 1
+  }
+}
+
+// 背景の (x, y) のマスに、タイル tile を置く
+fn put(x: u8, y: u8, tile: u8) {
+  var row: u16 = y
+  var col: u16 = x
+  vram_at(NAMES + (row << 6) + (col << 1))
+  port[VDP_DATA] = tile
+  port[VDP_DATA] = 0
+}
+
+// ---- スプライト。絵はタイルの 256 番から（背景とは別の場所） ----
+
+// 8x8 の絵を pat 番に登録する。data は 8 バイトの表。色はスプライトのパレット（16 + color）
+fn sprite_pattern(pat: u8, data_: u16, color: u8) {
+  var t: u16 = pat
+  tiles(256 + t, data_, 1, color)
+}
+
+// n 枚目（0〜63）のスプライトを (x, y) に、絵 pat で置く
+fn sprite(n: u8, x: u8, y: u8, pat: u8) {
+  var i: u16 = n
+  vram_at(SPR_ATTR + i)
+  port[VDP_DATA] = y
+  vram_at(SPR_ATTR + 0x80 + (i << 1))
+  port[VDP_DATA] = x
+  port[VDP_DATA] = pat
+}
+
+// ---- PSG（SN76489） ----
+fn tone(ch: u8, period: u16) {                         // ch: 0〜2。period: 111861 / 周波数（1023 まで。式は MSX と同じ）
+  port[PSG] = 0x80 | (ch << 5) | ((period as u8) & 15)
+  port[PSG] = ((period >> 4) as u8) & 0x3f
+}
+fn volume(ch: u8, v: u8) { port[PSG] = 0x90 | (ch << 5) | (15 - v) }   // v: 0〜15
+
+// ---- 入力 ----
+const PAD_UP = 1
+const PAD_DOWN = 2
+const PAD_LEFT = 4
+const PAD_RIGHT = 8
+const PAD_1 = 16
+const PAD_2 = 32
+fn pad() -> u8 { return ~port[PAD] }                   // 押されているボタンのビットが 1
+
+// ---- 時間 ----
+fn vsync() { ei()  halt() }                            // 次の割り込み（1/60 秒ごと）まで待つ
+
+// 画面の割り込みごとに f を呼ばせる。f は &関数名。レジスタは割り込みの入口がしまってある。
+// 割り込みから呼ばれる関数と、普段の処理から呼ばれる関数は、分けておくこと（変数の置き場所が固定なので）。
+fn on_vsync(f: u16) {
+  di()
+  mem[IRQ_HOOK] = 0xc3                                 // jp f
+  mem16[IRQ_HOOK + 1] = f
+  ei()
+}

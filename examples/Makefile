@@ -7,8 +7,8 @@
 HLC = ../_build/default/bin/hlc.exe
 MACHINE = C-BIOS_MSX1
 
-.PHONY: all clean
-all: $(patsubst %.hl,%.rom,$(wildcard *.hl))
+.PHONY: all clean sms
+all: $(patsubst %.hl,%.rom,$(filter-out sms_%,$(wildcard *.hl))) sms_game.sms
 
 # コンパイラは、ソースが変わったときだけ作り直す
 $(HLC): $(wildcard ../src/*.ml ../bin/*.ml ../emu/*.ml)
@@ -17,10 +17,17 @@ $(HLC): $(wildcard ../src/*.ml ../bin/*.ml ../emu/*.ml)
 %.rom: %.hl $(HLC) ../lib/msx.hl
 	$(HLC) $<
 
+# セガ・マスターシステム版: make sms_game.sms で ROM、make sms で MAME（ウィンドウ）で動かす
+%.sms: %.hl $(HLC) ../lib/sms.hl
+	$(HLC) $< -sms
+
+sms: sms_game.sms
+	mame sg1000m3 -cart $< -window -skip_gameinfo
+
 %: %.rom
 	openmsx -machine $(MACHINE) -cart $<
 
 clean:
-	rm -f *.rom
+	rm -f *.rom *.sms *.png
 
 .PRECIOUS: %.rom

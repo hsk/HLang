@@ -25,6 +25,32 @@ let msx : Alloc.target = {
   head = Asm.[ Db [ Num 0x41; Num 0x42 ]; Dw [ Sym "start" ]; Ds 12 ];
 }
 
+(* セガ・マスターシステム: 0 番地から 32KB。RAM は 0xc000 から。
+   0 番地が起動、0x38 が画面の割り込み、0x66 がポーズボタン（NMI）と決まっているので、先頭にその 3 つを置く。
+   割り込みはレジスタを全部しまい、VDP の状態を読んで（読まないと次が来ない）、RAM のフック sms_hook を呼ぶ。
+   フックは起動時に ret にしておき、lib/sms.hl の on_vsync が jp に書き換える。 *)
+let sms_hook = 0xdff8
+let sms : Alloc.target =
+  let open Asm in
+  let ins op args = Ins (op, args) and r x = R x and n v = I (Num v) in
+  let regs = [ "af"; "bc"; "de"; "hl"; "ix"; "iy" ] in
+  let boot = [
+    ins "di" []; ins "im" [ n 1 ]; ins "ld" [ r "sp"; n 0xdff0 ];
+    ins "ld" [ r "hl"; n 0xfffc ];                               (* ROM の切り替え（マッパー）を初めの状態に *)
+    ins "ld" [ M (r "hl"); n 0 ]; ins "inc" [ r "hl" ]; ins "ld" [ M (r "hl"); n 0 ]; ins "inc" [ r "hl" ];
+    ins "ld" [ M (r "hl"); n 1 ]; ins "inc" [ r "hl" ]; ins "ld" [ M (r "hl"); n 2 ];
+    ins "ld" [ r "a"; n 0xc9 ]; ins "ld" [ M (n sms_hook); r "a" ];
+    ins "jp" [ I (Sym "start") ] ]
+  and irq =
+    List.map (fun x -> ins "push" [ r x ]) regs
+    @ [ ins "in" [ r "a"; M (n 0xbf) ]; ins "call" [ n sms_hook ] ]
+    @ List.map (fun x -> ins "pop" [ r x ]) (List.rev regs)
+    @ [ ins "ei" []; ins "ret" [] ]
+  in
+  let size l = String.length (fst (assemble ~org:0 (Label "start" :: l))) in
+  { org = 0; ram = 0xc000;
+    head = boot @ [ Ds (0x38 - size boot) ] @ irq @ [ Ds (0x66 - 0x38 - size irq); ins "retn" [] ] }
+
 type result = {
   prog : Check.prog;
   ir : Ir.fn list;
@@ -32,6 +58,7 @@ type result = {
   bin : string;                                (* 組み立てたままのバイト列 *)
   syms : (string * int) list;
   org : int;
+  target : Alloc.target;
 }
 
 (* エミュレータで走らせる。extern 関数は ext が肩代わりする（参照インタプリタと同じ形）。 *)
@@ -73,10 +100,18 @@ let compile ?(target = msx) ?(opt = true) ?read src =
   let bin, syms =
     try Asm.assemble ~org:target.org asm with Asm.Error m -> raise (Ast.Error (0, m))
   in
-  { prog; ir; asm; bin; syms; org = target.org }
+  { prog; ir; asm; bin; syms; org = target.org; target }
 
-(* 16KB の ROM イメージ。余りは 0xff で埋める。 *)
+(* ROM イメージ。余りは 0xff で埋める。MSX は 16KB。
+   SMS は 32KB で、最後の 16 バイトに "TMR SEGA" の印と、そこまでの全バイトの和を置く（海外版の本体が起動時に調べる）。 *)
 let rom r =
-  let size = 0x4000 in
-  if String.length r.bin > size then raise (Ast.Error (0, "ROM に入りきらない"));
-  r.bin ^ String.make (size - String.length r.bin) '\xff'
+  let fill size =
+    if String.length r.bin > size then raise (Ast.Error (0, "ROM に入りきらない"));
+    r.bin ^ String.make (size - String.length r.bin) '\xff'
+  in
+  if r.target != sms then fill 0x4000
+  else begin
+    let body = fill 0x7ff0 in
+    let sum = String.fold_left (fun n c -> (n + Char.code c) land 0xffff) 0 body in
+    body ^ "TMR SEGA\000\000" ^ String.init 2 (fun i -> Char.chr ((sum lsr (8 * i)) land 255)) ^ "\000\000\000\x4c"
+  end

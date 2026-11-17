@@ -12,7 +12,7 @@ hlang は Z80 向けの小さなコンパイル言語です。この文書は、
 | [6. インタプリタを書くための部品](06-interpreter.md) | 列挙型、網羅性チェック付きの match（出し方は測って選ぶ）、next、表と配列、添字をポインタに直す最適化、手書きとの比較 | [src/check.ml](../src/check.ml), [src/cps.ml](../src/cps.ml), [src/gen.ml](../src/gen.ml), [src/ptr.ml](../src/ptr.ml) |
 
 | [7. タスク](07-tasks.md) | yield、wait、spawn、resume。途中で止まって続きから動く | [src/gen.ml](../src/gen.ml), [src/interp.ml](../src/interp.ml) |
-| [8. MSX で動かす](08-msx.md) | 画面と音。import、関数の番地、割り込み、ライブラリ | [lib/msx.hl](../lib/msx.hl), [examples/music.hl](../examples/music.hl) |
+| [8. MSX と SMS で動かす](08-msx.md) | 画面と音。import、関数の番地、割り込み、ライブラリ。セガ・マスターシステム版 | [lib/msx.hl](../lib/msx.hl), [lib/sms.hl](../lib/sms.hl), [examples/game.hl](../examples/game.hl), [examples/sms_game.hl](../examples/sms_game.hl) |
 
 ## 全体の流れ
 
@@ -40,6 +40,8 @@ dune exec bin/hlc.exe -- examples/hello.hl --run  # エミュレータで実行
 dune exec bin/hlc.exe -- examples/game.hl --report  # 大きさ、呼び出し規約、時間の上限
 dune exec bin/hlc.exe -- examples/hello.hl        # hello.rom を作る（MSX の 16KB ROM）
 tools/msx-screen.sh examples/hello.rom            # openMSX で起動して画面の文字を読む
+dune exec bin/hlc.exe -- examples/sms_game.hl -sms  # sms_game.sms を作る（SMS の 32KB ROM）
+tools/sms-screen.sh examples/sms_game.sms         # MAME で起動して画面を撮る
 ```
 
 `-O0` を付けると最適化なし（変数をすべてメモリに置く）のコードが出ます。比べると、探索が何をしたかが分かります。

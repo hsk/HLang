@@ -481,7 +481,7 @@ let program ~opt (tg : target) (p : Check.prog) (fns : Ir.fn list) : line list =
       (fun (x, t, vs) ->
         let es = List.map (fun v -> Num v) vs in
         [ Fit (List.length vs * w t); Label x; (if Ast.wide t then Dw es else Db es) ])
-      p.datas
+      (List.filter (fun (x, _, _) -> Hashtbl.mem used x) p.datas)        (* 使わなかった表は ROM に入れない *)
   in
   (* 表にした関数: 256 バイト境界に下位 256 個、16bit ならすぐ次のページに上位 256 個 *)
   let luts =
