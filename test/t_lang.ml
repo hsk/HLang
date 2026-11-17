@@ -576,6 +576,25 @@ fn main() {
   puth(tiny(tiny(5)))
   for i in 0..8 { putc('0' + arr[i]) }
 }|}, "0003 00ff +++000a 0007 13068:<>";
+  "壊すレジスタの約束（clobbers）", {|
+var arr: [u8; 16]
+fn fill(p: u16, x: u8) clobbers(a, hl) {  // ループ、途中の return、ほかの関数を呼ぶ
+  for i in 0..4 { mem[p + i as u16] = x + i }
+  if x == 3 { return }
+  mem[p] = mix(x, x)
+}
+fn mix(a: u8, b: u8) -> u8 { var s: u8 = 0  for i in 0..a { s += b ^ i }  return s }
+fn last(x: u8) -> u8 clobbers() { return mix(x, 3) }      // 戻り値の A は壊してよい。末尾で呼ぶ
+fn main() {
+  var t: u8 = 0
+  for b in 0..4 {
+    var k: u8 = b * 3
+    fill(&arr + (b as u16) * 4, b)
+    t += k + last(b)
+  }
+  puth(t)
+  for i in 0..16 { puth(arr[i]) }
+}|}, "0020 0000 0001 0002 0003 0001 0002 0003 0004 0005 0003 0004 0005 0003 0004 0005 0006 ";
   "符号付きの数", {|
 var gv: i8 = -3
 fn sign(v: i8) -> u8 { if v < 0 { return '-' }  if v == 0 { return '0' }  return '+' }

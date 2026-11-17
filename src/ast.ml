@@ -59,6 +59,7 @@ type 'a fn = {
   body : 'a stmt list;
   lut : bool;                    (* lut fn: コンパイル時に全部の値を計算して表にする *)
   inline : bool;                 (* inline fn: 呼ぶ所に本体を展開する（最適化ありのとき） *)
+  clobbers : string list option; (* clobbers(a, hl): この関数が壊してよいレジスタ。ほかは中でしまっておく *)
   task : bool;                   (* task: 途中で中断して、後で続きから再開できる *)
   pool : int;                    (* task ... pool n: 同時に n 個まで動かせる。0 なら 1 個だけのタスク *)
   self : string;                 (* プールのタスクで、いま動いている個体のフレームを指す変数 *)

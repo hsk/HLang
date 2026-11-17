@@ -117,8 +117,14 @@ let reads (op, args) =
   | _ -> None
 
 (* 読まれる前に上書きされる 8bit レジスタへの ld を消す。ラベル、飛ぶ・呼ぶ・戻る命令に当たったら、
-   生きているとみなす。ld はフラグを変えないので、消しても困らない。 *)
-let dead_ld code =
+   生きているとみなす。ld はフラグを変えないので、消しても困らない。
+   16bit の inc / dec（フラグを変えない）も、結果が読まれないなら消す。16bit の読み書きの後に、
+   HL を元へ戻す dec hl がよく残る。
+   ld r,a のすぐ後の ld a,r（と、その逆）は、同じ値を写し戻すだけなので消す。
+   この 2 つ（fine）は、割り当てが決まった後のコードにだけかける。探索の値段に入れると、値段の小さな違いで
+   貪欲な探索が別の割り当てに落ち、かえって遅くなった（damaxian 02 の BulletMove）。消すだけなので、
+   最後にかければ、元より遅くなることはない。 *)
+let dead_ld ~fine code =
   let rec live r = function
     | (Rem _, _) :: rest -> live r rest
     | (Ins i, _) :: rest ->
@@ -129,14 +135,82 @@ let dead_ld code =
   in
   let rec go = function
     | (Ins ("ld", [ R r; _ ]), _) :: rest when List.mem r all8 && not (live r rest) -> go rest
+    | (Ins (("inc" | "dec"), [ R (("hl" | "de" | "bc") as r) ]), _) :: rest
+      when fine && not (List.exists (fun h -> live h rest) (halves r)) -> go rest
+    | ((Ins ("ld", [ R x; R y ]), _) as i) :: (Ins ("ld", [ R y'; R x' ]), _) :: rest
+      when fine && x = y' && y = x' && List.mem x all8 && List.mem y all8 -> go (i :: rest)
     | x :: rest -> x :: go rest
     | [] -> []
   in
   go code
 
-let tidy keep code =
-  let once code = dead keep (rewrite (thread (dead_ld code))) in
-  Cost.short (once (once code))
+let tidy ?(fine = false) ?(wrap = fun c -> c) keep code =
+  let once code = dead keep (rewrite (thread (dead_ld ~fine code))) in
+  Cost.short (wrap (once (once code)))
+
+(* 関数の壊すレジスタ: 自分が書くものと、呼んだ先が壊すもの *)
+let clobs ~info ~exts code =
+  List.sort_uniq compare
+    (List.concat_map
+       (fun (line, _) ->
+         match line with
+         | Ins (("call" | "jp"), [ I (Sym g) ]) when Hashtbl.mem info g -> (Hashtbl.find info g : Gen.info).clob
+         | Ins (("call" | "jp"), [ I (Num n) ]) ->
+           (match List.find_opt (fun (_, (_, _, addr, _)) -> addr = n) exts with
+            | Some (_, (_, _, _, clob)) -> clob
+            | None -> all8)
+         | Ins ("call", _) -> all8
+         | Ins i -> writes i
+         | _ -> [])
+       code)
+
+(* clobbers(...) と書いた関数が壊してよいレジスタ。戻り値のレジスタは、書かなくても壊してよい *)
+let allowed (f : Ir.fn) =
+  Option.map (fun ok -> ok @ (match f.ret with Some U8 -> [ "a" ] | Some U16 -> [ "h"; "l" ] | None -> [])) f.clobbers
+
+let pair_of = function "a" -> "af" | "b" | "c" -> "bc" | "d" | "e" -> "de" | "h" | "l" -> "hl" | r -> r
+
+(* clobbers(...) の約束を守る。約束にないのに壊すレジスタの組を、入口で push し、出口で pop する。
+     ret           ->  pop ...; ret
+     ret cc        ->  jp cc,f.out（f.out: pop ...; ret）
+     jp g（末尾呼び出し）  ->  call g; pop ...; ret
+   自分の入口へ戻るループは、push の後（f.in）へ飛ぶ。割り当ての値段にこの分が入るので、探索は
+   約束にないレジスタを、なるべく使わないように選ぶ。 *)
+let keep (f : Ir.fn) ~info ~exts code =
+  match allowed f with
+  | None -> code
+  | Some ok ->
+    let bad = List.filter (fun r -> not (List.mem r ok)) (clobs ~info ~exts code) in
+    let order = List.filter (fun q -> List.exists (fun r -> pair_of r = q) bad) [ "af"; "bc"; "de"; "hl"; "ix"; "iy" ] in
+    if order = [] then code
+    else begin
+      let local = Hashtbl.create 32 in
+      List.iter (function Label l, _ -> Hashtbl.replace local l () | _ -> ()) code;
+      let entry = f.name ^ ".in" and out = f.name ^ ".out" in
+      let pops w = List.rev_map (fun q -> Ins ("pop", [ R q ]), w) order @ [ Ins ("ret", []), w ] in
+      let wout = ref 0. in
+      let rec go = function
+        | (Label l, w) :: rest when l = f.name ->
+          ((Label l, w) :: List.map (fun q -> Ins ("push", [ R q ]), w) order) @ ((Label entry, w) :: go rest)
+        | (Ins ("ret", []), w) :: rest -> pops w @ go rest
+        | (Ins ("ret", [ R cc ]), w) :: rest -> wout := !wout +. w; (Ins ("jp", [ R cc; I (Sym out) ]), w) :: go rest
+        | (Ins ("jp", [ I ((Sym _ | Num _) as g) ]), w) :: rest when (match g with Sym l -> not (Hashtbl.mem local l) | _ -> true) ->
+          ((Ins ("call", [ I g ]), w) :: pops w) @ go rest
+        | (Ins (op, args), w) :: rest ->
+          (Ins (op, List.map (function I (Sym l) when l = f.name -> I (Sym entry) | a -> a) args), w) :: go rest
+        | x :: rest -> x :: go rest
+        | [] -> []
+      in
+      let body = go code in
+      if !wout > 0. then body @ ((Label out, !wout) :: pops !wout) else body
+    end
+
+(* 壊すレジスタを、clobbers(...) の書き方で（組がそろっていれば bc などとまとめる） *)
+let show_clob rs =
+  let has r = List.mem r rs in
+  let pairs = List.filter (fun q -> List.for_all has (halves q)) [ "bc"; "de"; "hl" ] in
+  let rest = List.filter (fun r -> not (List.exists (fun q -> List.mem r (halves q)) pairs)) rs in
+  "clobbers(" ^ String.concat ", " (List.filter has [ "a" ] @ pairs @ List.filter (fun r -> r <> "a") rest) ^ ")"
 
 (* ---- 関数 1 つの割り当て ---- *)
 
@@ -155,11 +229,11 @@ let solve ~opt ~info ~exts (f : Ir.fn) body vars =
     let r = Hashtbl.find cls x in
     match Hashtbl.find chome r with "" -> "@" ^ f.name ^ "." ^ r | h -> h
   in
-  let gen () =
+  let gen ?fine () =
     let code, data = Gen.fn ~info ~exts ~home ~pick:opt f body in
     (* 表から参照される飛び先は、消してはいけない *)
-    let keep = List.concat_map (function Db es -> List.fold_left refs_e [] es | _ -> []) data in
-    tidy (f.name :: (f.name ^ ".done") :: keep) code, data
+    let labels = List.concat_map (function Db es -> List.fold_left refs_e [] es | _ -> []) data in
+    tidy ?fine ~wrap:(keep f ~info ~exts) (f.name :: (f.name ^ ".done") :: labels) code, data
   in
   let price (code, data) = Cost.price code data in
   (* 試せる回数には上限を付ける。大きな関数で時間が膨らまないように。
@@ -211,6 +285,13 @@ let solve ~opt ~info ~exts (f : Ir.fn) body vars =
       List.iter
         (fun (x, t, _) ->
           if Hashtbl.find cls x = x then begin
+            (* clobbers(...) と書いた関数の引数は、書いたレジスタにだけ置く。呼ぶ側が引数を入れるレジスタも、
+               呼べば変わるレジスタだから *)
+            let ok_home h =
+              match allowed f with
+              | Some ok when List.exists (fun (p, _) -> Hashtbl.find cls p = x) f.ps -> List.for_all (fun r -> List.mem r ok) (halves h)
+              | _ -> true
+            in
             let cur = Hashtbl.find chome x in
             let pick = ref (cur, []) in
             (* h にいる同じ型のまとまり。x を h へ動かすとき、x の元の場所へ押し出してみる（入れ替え） *)
@@ -233,9 +314,10 @@ let solve ~opt ~info ~exts (f : Ir.fn) body vars =
                   let ys = there h in
                   if ys <> [] && !left > 0 then trial ys
                 end)
-              ((if t = U8 then regs8
-                else if Option.map (Hashtbl.find cls) f.self = Some x then [ "hl"; "ix"; "de"; "bc" ]
-                else regs16 @ [ "ix"; "iy" ])
+              (List.filter ok_home
+                 (if t = U8 then regs8
+                  else if Option.map (Hashtbl.find cls) f.self = Some x then [ "hl"; "ix"; "de"; "bc" ]
+                  else regs16 @ [ "ix"; "iy" ])
                @ [ "" ]);
             let h, ys = !pick in
             set h ys
@@ -247,7 +329,7 @@ let solve ~opt ~info ~exts (f : Ir.fn) body vars =
     ignore (round ());
     rounds 4
   end;
-  let code, data = gen () in
+  let code, data = gen ~fine:opt () in
   (* メモリ上の置き場所の候補。実際に使われたものだけ、後で番地を割り当てる。 *)
   let slots =
     List.filter_map
@@ -341,22 +423,11 @@ let divmod =
 
 let fn ~opt ~info ~exts (f : Ir.fn) =
   let code, data, phome, slots = solve ~opt ~info ~exts f (L.annotate f) (L.vars f) in
-  (* 壊すレジスタ: 自分が書くものと、呼んだ先が壊すもの *)
-  let clob =
-    List.sort_uniq compare
-      (List.concat_map
-         (fun (line, _) ->
-           match line with
-           | Ins (("call" | "jp"), [ I (Sym g) ]) when Hashtbl.mem info g -> (Hashtbl.find info g : Gen.info).clob
-           | Ins (("call" | "jp"), [ I (Num n) ]) ->
-             (match List.find_opt (fun (_, (_, _, addr, _)) -> addr = n) exts with
-              | Some (_, (_, _, _, clob)) -> clob
-              | None -> all8)
-           | Ins ("call", _) -> all8
-           | Ins i -> writes i
-           | _ -> [])
-         code)
-  in
+  (* 壊すレジスタ。clobbers(...) と書いてあれば、ほかは中でしまってあるので、書いたものだけ *)
+  let clob = clobs ~info ~exts code in
+  let clob = match allowed f with Some ok -> List.filter (fun r -> List.mem r ok) clob | None -> clob in
+  (* 関数の頭の注釈に、壊すレジスタを書き足す（extern の宣言に、そのまま写せる形） *)
+  let code = List.map (function Rem s, w when String.starts_with ~prefix:("fn " ^ f.name ^ "(") s -> Rem (s ^ " " ^ show_clob clob), w | x -> x) code in
   if not f.task || f.self <> None then List.map fst code, data, { Gen.phome; clob }, slots
   else begin
     (* タスク: 続きの番地を置く場所と、そこへ飛ぶ入口を足す *)

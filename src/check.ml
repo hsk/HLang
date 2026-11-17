@@ -644,6 +644,7 @@ let check (tops : int top list) : prog =
         Hashtbl.replace env.tasks f.name (List.map snd f.ps)
       | Fn (f, ln) ->
         define ln f.name;
+        Option.iter (List.iter (fun r -> if Asm.halves r = [] then err ln "知らないレジスタ: %s" r)) f.clobbers;
         if f.ps = [] && not f.lut then Hashtbl.replace env.fns f.name ();
         List.iter (fun (_, t) -> valid env ln t) f.ps;
         valid env ln f.ret;

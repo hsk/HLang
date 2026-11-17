@@ -165,6 +165,14 @@ let parse ?base src =
       if eat "," then p :: params () else (expect ")"; [ p ])
     end
   in
+  (* clobbers(a, hl): 壊すレジスタの並び。書いていなければ None *)
+  let clobbers () =
+    if kw "clobbers" then begin
+      expect "(";
+      let rec rs () = if eat ")" then [] else (let r = ident () in ignore (eat ","); r :: rs ()) in
+      Some (rs ())
+    end else None
+  in
   let top () =
     let ln = line () in
     if kw "const" then (let x = ident () in expect "="; Const (x, expr ()))
@@ -226,13 +234,7 @@ let parse ?base src =
       let ret = if eat "->" then ty () else Unit in
       expect "@";
       let addr = expr () in
-      let clob =
-        if kw "clobbers" then begin
-          expect "(";
-          let rec rs () = if eat ")" then [] else (let r = ident () in ignore (eat ","); r :: rs ()) in
-          Some (rs ())
-        end else None
-      in
+      let clob = clobbers () in
       Extern (name, ps, ret, addr, clob, ln)
     end
     else if kw "struct" then begin             (* struct Enemy { x: u8, hp: u8 } *)
@@ -258,7 +260,8 @@ let parse ?base src =
       expect "(";
       let ps = params () in
       let ret = if eat "->" then ty () else Unit in
-      Fn ({ name; ps; ret; body = block (); lut; inline; task = false; pool = 0; self = "" }, ln)
+      let clobbers = clobbers () in
+      Fn ({ name; ps; ret; body = block (); lut; inline; clobbers; task = false; pool = 0; self = "" }, ln)
     end
     else if kw "task" then begin               (* task 名前() { ... } / task 名前(x: u8) pool 8 { ... } *)
       let name = ident () in
@@ -266,7 +269,7 @@ let parse ?base src =
       let ps = params () in
       let pool = if kw "pool" then (match next () with Int n when n > 0 -> n | _ -> decr i; fail "個数") else 0 in
       if ps <> [] && pool = 0 then err ln "引数を取れるのは pool を付けたタスクだけ";
-      Fn ({ name; ps; ret = Unit; body = block (); lut = false; inline = false; task = true; pool; self = "" }, ln)
+      Fn ({ name; ps; ret = Unit; body = block (); lut = false; inline = false; clobbers = None; task = true; pool; self = "" }, ln)
     end
     else if kw "import" then (match next () with Str s -> Import (s, ln) | _ -> decr i; fail "ファイル名")
     else fail "fn, task, var, const, data, enum, struct, extern, import のどれか"
