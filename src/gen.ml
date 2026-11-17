@@ -43,8 +43,8 @@ type ctx = {
   heads : (string, string * ty * atom * atom * string * L.t) Hashtbl.t;
   mutable norot : bool;
   pick : bool;                                         (* 値での分岐の出し方を、測って選ぶか *)
-  mutable ofs : int;                                   (* HL が本来の値からいくつ進んでいるか *)
-  mutable walking : bool;                              (* 進んだままの HL を使う命令を出している最中 *)
+  mutable ofs : (string * int) list;                   (* 歩いているポインタ（HL, DE, BC）が、本来の値からいくつ進んでいるか *)
+  mutable walking : bool;                              (* 進んだままのポインタを使う命令を出している最中 *)
   mutable data : line list;                            (* 関数の外に置く表 *)
   bodies : (string, L.t * float) Hashtbl.t;            (* 継続 -> (本体, そこの重み) *)
   mutable wsel : float option;                         (* 複製の中: 分岐の出し方は、元の場所の重みで選ぶ *)
@@ -109,26 +109,34 @@ let keeps_flags = function
 
 let push c op args = c.out <- (Ins (op, args), c.w) :: c.out
 
-(* 構造体のフィールドを順に読むとき、HL を進めたままにしておく（ofs がその量）。
-   次のフィールドへは差の分だけ進めばよい。HL を本来の値として使う命令の前で、まとめて戻す。 *)
-let settle c =
-  let n = c.ofs in
-  c.ofs <- 0;
-  for _ = 1 to abs n do push c (if n > 0 then "dec" else "inc") [ R "hl" ] done
+(* 構造体のフィールドを順に読むとき、ポインタを進めたままにしておく（ofs がその量）。
+   次のフィールドへは差の分だけ進めばよい。ポインタを本来の値として使う命令の前で、まとめて戻す。
+   HL は (hl) で何とでも読み書きできる。DE と BC は ld a,(de) / ld (de),a のように A とだけ。 *)
+let ofs_of c r = Option.value ~default:0 (List.assoc_opt r c.ofs)
+let set_ofs c r n = c.ofs <- (if n = 0 then [] else [ r, n ]) @ List.remove_assoc r c.ofs
 
-let rec mentions = function R ("h" | "l" | "hl") -> true | M x -> mentions x | _ -> false
+let settle_r c r =
+  let n = ofs_of c r in
+  set_ofs c r 0;
+  for _ = 1 to abs n do push c (if n > 0 then "dec" else "inc") [ R r ] done
+
+let settle c = List.iter (fun (r, _) -> settle_r c r) c.ofs
+
+let rec mentions r = function R x -> x = r || List.mem x (halves r) | M x -> mentions r x | _ -> false
 
 (* 検査なしで出す。レジスタを最終的に変えない命令列や、フラグだけの命令に使う。 *)
 let raw c op args =
-  if c.ofs <> 0 && not c.walking then begin
-    match op, args with
-    | "ret", [] -> c.ofs <- 0                           (* 戻るだけなら HL はもう要らない *)
-    | "ret", _ -> ()                                   (* 条件付き: 戻らなかったときは、進んだままの HL で続ける *)
-    | ("ld" | "pop"), R "hl" :: rest when not (List.exists mentions rest) -> c.ofs <- 0   (* 上書き *)
-    | "call", _ when List.mem "h" c.busy -> ()         (* 呼んだ先は HL を壊さない（壊すなら行き詰まっている） *)
-    | ("jp" | "call" | "djnz"), _ -> if List.mem "h" c.busy then settle c else c.ofs <- 0
-    | _ -> if List.exists mentions args then settle c
-  end;
+  if c.ofs <> [] && not c.walking then
+    List.iter
+      (fun (r, _) ->
+        match op, args with
+        | "ret", [] -> set_ofs c r 0                    (* 戻るだけならポインタはもう要らない *)
+        | "ret", _ -> ()                               (* 条件付き: 戻らなかったときは、進んだままで続ける *)
+        | ("ld" | "pop"), R r' :: rest when r' = r && not (List.exists (mentions r) rest) -> set_ofs c r 0   (* 上書き *)
+        | "call", _ when List.mem (hi r) c.busy -> ()  (* 呼んだ先はポインタを壊さない（壊すなら行き詰まっている） *)
+        | ("jp" | "call" | "djnz"), _ -> if List.mem (hi r) c.busy then settle_r c r else set_ofs c r 0
+        | _ -> if List.exists (mentions r) args then settle_r c r)
+      c.ofs;
   push c op args
 
 let label c l = settle c; c.out <- (Label l, c.w) :: c.out
@@ -592,8 +600,11 @@ let pure c k args =
 (* 条件付きで継続へ飛ぶ。飛んだ先で HL の値が要らないなら、HL は進んだままでよい（戻す命令を出さない） *)
 let jcc c cc k =
   let ps, live = Hashtbl.find c.konts k in
-  let in_hl x = List.exists (fun r -> r = "h" || r = "l") (places (c.home x)) in
-  if c.ofs <> 0 && not (SS.exists in_hl live || List.exists (fun (p, _) -> in_hl p) ps)
+  let dead (r, _) =
+    let inr x = List.exists (fun h -> List.mem h (halves r)) (places (c.home x)) in
+    not (SS.exists inr live || List.exists (fun (p, _) -> inr p) ps)
+  in
+  if c.ofs <> [] && List.for_all dead c.ofs
   then push c "jp" [ R cc; klabel c k ]
   else raw c "jp" [ R cc; klabel c k ]
 
@@ -602,13 +613,12 @@ let show_params c ps = String.concat ", " (List.map (fun (p, _) -> p ^ ": " ^ sh
 
 let reset c = c.ca <- None; c.chl <- None; c.hnear <- None; c.zf <- None; c.held <- None
 
-(* HL を本来の値 + n の位置へ動かす。以後、walking を下ろすまでの命令は進んだままの HL を使う。 *)
-let walk c n =
-  let d = n - c.ofs in
-  for _ = 1 to abs d do push c (if d > 0 then "inc" else "dec") [ hl ] done;
-  c.ofs <- n;
-  c.chl <- None;
-  c.hnear <- None;
+(* ポインタ r（既定は HL）を本来の値 + n の位置へ動かす。以後、walking を下ろすまでの命令は進んだままの r を使う。 *)
+let walk ?(r = "hl") c n =
+  let d = n - ofs_of c r in
+  for _ = 1 to abs d do push c (if d > 0 then "inc" else "dec") [ R r ] done;
+  set_ofs c r n;
+  if r = "hl" then (c.chl <- None; c.hnear <- None);
   c.walking <- true
 
 (* ---- 番地 + 定数にあるフィールド。構造体と、プールのタスクのフレームで使う ---- *)
@@ -618,19 +628,22 @@ let disp o = function
   | C n -> let n = (if o = "+" then n else -n) land 0xffff in Some (if n > 0x7fff then n - 0x10000 else n)
   | _ -> None
 
-let fieldable c p = c.home p = "hl" || is_x (c.home p)
+let fieldable c p = List.mem (c.home p) [ "hl"; "de"; "bc" ] || is_x (c.home p)
 
-(* p + n を指すオペランド。p が HL なら HL をそこまで進めて (hl)、IX なら (ix+n)。 *)
-let field c p n =
+(* p + n を指すオペランド。p が HL なら HL をそこまで進めて (hl)、IX なら (ix+n)。
+   DE, BC なら、A と読み書きするとき（a）だけ、そこまで進めて (de)。 *)
+let field ?(a = false) c p n =
   match c.home p with
-  | "hl" when abs (n - c.ofs) <= 4 -> walk c n; M hl
+  | "hl" when abs (n - ofs_of c "hl") <= 4 -> walk c n; M hl
+  | ("de" | "bc") as r when a && abs (n - ofs_of c r) <= 4 -> walk ~r c n; M (R r)
   | ("ix" | "iy") as x when n >= -128 && n < 127 -> M (X (x, Num n))
   | _ -> raise (Stuck "フィールドを直接は指せない")
 
 (* 続く 1 バイト（16bit の上位） *)
 let field2 c p n =
   if is_x (c.home p) then M (X (c.home p, Num (n + 1)))
-  else (push c "inc" [ hl ]; c.ofs <- c.ofs + 1; M hl)
+  else if c.home p = "hl" then (push c "inc" [ hl ]; set_ofs c "hl" (ofs_of c "hl" + 1); M hl)
+  else raise (Stuck "16bit は DE, BC を歩いて読み書きしない")
 
 (* タスクの「続きの番地」を書く。None は「終わった」。
    1 個だけのタスクは決まった場所に書く。プールのタスクは、フレームの変数の手前 2 バイトに書く。
@@ -643,7 +656,7 @@ let set_pc c l =
     emit c "ld" [ M (I (Sym (c.f ^ ".pc"))); hl ]
   | Some s, l ->
     set_live c (SS.singleton s);
-    if not (fieldable c s) then to_hl c (V s);
+    if not (c.home s = "hl" || is_x (c.home s)) then to_hl c (V s);
     let at n = if is_x (c.home s) then M (X (c.home s, Num n)) else (walk c n; M hl) in
     (match l with
      | Some l ->
@@ -753,9 +766,9 @@ let rec term c (t : L.t) =
         let read () =
           set_live c (SS.remove x k.lv);
           (match ty with
-           | U8 when is_mem hx -> let f = field c p n in emit c "ld" [ a; f ]; c.walking <- false; st c U8 x
+           | U8 when is_mem hx -> let f = field ~a:true c p n in emit c "ld" [ a; f ]; c.walking <- false; st c U8 x
            | U8 when viahl && (hx = "h" || hx = "l") -> raise (Stuck "HL を歩きながら H, L には読めない")
-           | U8 -> let f = field c p n in emit c "ld" [ R hx; f ]
+           | U8 -> let f = field ~a:(hx = "a") c p n in emit c "ld" [ R hx; f ]
            | U16 when hx = "de" || hx = "bc" || (hx = "hl" && not viahl) ->
              let f = field c p n in emit c "ld" [ R (lo hx); f ];
              let f = field2 c p n in emit c "ld" [ R (hi hx); f ]
@@ -798,7 +811,7 @@ let rec term c (t : L.t) =
              | Imm e -> I e
              | Slot _ -> to_a c v; a
            in
-           let f = field c p n in emit c "ld" [ f; src ]
+           let f = field ~a:(src = a) c p n in emit c "ld" [ f; src ]
          | U16 ->
            let wl, wh = match loc c U16 v with
              | Imm e -> I (Lo e), I (Hi e)
@@ -1035,7 +1048,7 @@ let rec term c (t : L.t) =
        飛び先までの距離を見て出し方を選べる。継続の入口では何も当てにしないので、順番は入れ替えてよい。 *)
     let back = mark c and next = c.next in
     c.out <- [];
-    c.ofs <- 0;
+    c.ofs <- [];
     let w = c.w in
     List.iter
       (fun (k : L.kont) ->
@@ -1194,7 +1207,7 @@ let rec term c (t : L.t) =
 let fn ~info ~exts ~home ~pick (f : Ir.fn) (body : L.t) : (line * float) list * line list =
   let c = { f = f.name; task = f.task; self = f.self; home; konts = Hashtbl.create 16; info; exts; out = []; w = 1.;
             busy = []; ca = None; chl = None; hnear = None; zf = None; n = 0;
-            heads = Hashtbl.create 8; norot = false; pick; data = []; bodies = Hashtbl.create 16; wsel = None; dup = false; tabs = []; next = lazy []; ofs = 0; walking = false; last = None; held = None } in
+            heads = Hashtbl.create 8; norot = false; pick; data = []; bodies = Hashtbl.create 16; wsel = None; dup = false; tabs = []; next = lazy []; ofs = []; walking = false; last = None; held = None } in
   (* 引数どうしが同じ場所を取り合っていないこと *)
   let rec distinct = function
     | [] -> ()

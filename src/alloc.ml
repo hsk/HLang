@@ -280,7 +280,7 @@ let solve ~opt ~info ~exts (f : Ir.fn) body vars =
     in
     (* 何周かする。周りの置き場所が決まった後で、もっと良い場所が見つかることがある
        （A に置く値が決まって初めて、ポインタを HL に置ける、など）。良くならなかった周で終わり。 *)
-    let round () =
+    let round reps =
       let was = !best in
       List.iter
         (fun (x, t, _) ->
@@ -325,9 +325,20 @@ let solve ~opt ~info ~exts (f : Ir.fn) body vars =
         reps;
       !best < was
     in
-    let rec rounds n = if n > 0 && round () && n > 1 then rounds (n - 1) in
-    ignore (round ());
-    rounds 4
+    let rec rounds reps n = if n > 0 && round reps && n > 1 then rounds reps (n - 1) in
+    let run reps = ignore (round reps); rounds reps 4 in
+    (* 並べ方を変えて、もう一度初めから探し、安いほうを採る。1 つずつ動かす探索は、いくつかを同時に
+       動かさないと良くならない所で止まる（damaxian の BulletMove: B, C の 16bit 値を DE へ、D, E の 8bit 値を
+       B, C へ）。8bit のまとまりを先に決めると、そこへ入りやすい。 *)
+    let start = Hashtbl.copy chome and was = !best in
+    run reps;
+    let first = Hashtbl.copy chome and fbest = !best in
+    let restore t = Hashtbl.reset chome; Hashtbl.iter (Hashtbl.replace chome) t in
+    restore start;
+    best := was;
+    left := budget (List.length vars);
+    run (List.filter (fun (_, t, _) -> t = U8) reps @ List.filter (fun (_, t, _) -> t <> U8) reps);
+    if !best >= fbest then (restore first; best := fbest)
   end;
   let code, data = gen ~fine:opt () in
   (* メモリ上の置き場所の候補。実際に使われたものだけ、後で番地を割り当てる。 *)
