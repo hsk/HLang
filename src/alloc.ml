@@ -175,18 +175,33 @@ let solve ~opt ~info ~exts (f : Ir.fn) body vars =
         (fun (x, t, _) ->
           if Hashtbl.find cls x = x then begin
             let cur = Hashtbl.find chome x in
-            let pick = ref cur in
+            let pick = ref (cur, []) in
+            (* h にいる同じ型のまとまり。x を h へ動かすとき、x の元の場所へ押し出してみる（入れ替え） *)
+            let there h =
+              if h = "" then []
+              else List.filter_map (fun (y, ty, _) ->
+                  if y <> x && ty = t && Hashtbl.find cls y = y && Hashtbl.find chome y = h then Some y else None) vars
+            in
+            let set h ys = Hashtbl.replace chome x h; List.iter (fun y -> Hashtbl.replace chome y cur) ys in
+            let unset h ys = Hashtbl.replace chome x cur; List.iter (fun y -> Hashtbl.replace chome y h) ys in
             List.iter
               (fun h ->
                 if h <> cur && !left > 0 then begin
-                  Hashtbl.replace chome x h;
-                  match try_ () with Some c when c < !best -> best := c; pick := h | _ -> ()
+                  let trial ys =
+                    set h ys;
+                    (match try_ () with Some c when c < !best -> best := c; pick := (h, ys) | _ -> ());
+                    unset h ys
+                  in
+                  trial [];
+                  let ys = there h in
+                  if ys <> [] && !left > 0 then trial ys
                 end)
               ((if t = U8 then regs8
                 else if Option.map (Hashtbl.find cls) f.self = Some x then [ "hl"; "ix"; "de"; "bc" ]
                 else regs16 @ [ "ix"; "iy" ])
                @ [ "" ]);
-            Hashtbl.replace chome x !pick
+            let h, ys = !pick in
+            set h ys
           end)
         reps;
       !best < was
