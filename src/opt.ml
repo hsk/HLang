@@ -51,7 +51,9 @@ let fold ty e =
 (* 同じ「番地 + 定数」を指す変数 -> 最初にそれを計算した変数。読み込み済みかを調べるのに使う *)
 let same : (string, string) Hashtbl.t = Hashtbl.create 16
 
-(* sub: 置き換え（変数 -> 値）。pure: 計算済みの式。loads: 読み込み済みのメモリ。 *)
+let canon = function V m when Hashtbl.mem same m -> V (Hashtbl.find same m) | a -> a
+
+(* sub: 置き換え（変数 -> 値）。pure: 計算済みの式。loads: 中身の分かっているメモリ（読んだ値か、書いた値）。 *)
 let rec go sub pure loads t =
   let at = function V x -> (match List.assoc_opt x sub with Some a -> a | None -> V x) | a -> a in
   match t with
@@ -68,17 +70,18 @@ let rec go sub pure loads t =
      | In _ -> Let (x, ty, e, go sub pure loads k)
      | Load a ->
        (* 同じ番地を指す別の変数で読んであれば、それを使う *)
-       let key = ty, Load (match a with V m when Hashtbl.mem same m -> V (Hashtbl.find same m) | a -> a) in
-       (match List.assoc_opt key loads with
-        | Some y -> go ((x, V y) :: sub) pure loads k
-        | None -> Let (x, ty, e, go sub pure ((key, x) :: loads) k))
+       (match List.assoc_opt (ty, canon a) loads with
+        | Some y -> go ((x, y) :: sub) pure loads k
+        | None -> Let (x, ty, e, go sub pure (((ty, canon a), V x) :: loads) k))
      | Bin (("+" | "-"), V _, C _) when ty = U16 ->
        (* 番地 + 定数は使う所で計算し直す。直後の読み書きとまとめて、HL を進める形や (ix+d) にできる *)
        (match List.assoc_opt (ty, e) pure with
         | Some y -> Hashtbl.replace same x y; Let (x, ty, e, go sub pure loads k)
         | None -> Let (x, ty, e, go sub (((ty, e), x) :: pure) loads k))
      | _ -> reuse pure (fun p -> go sub (p :: pure) loads k))
-  | Store (ty, a, v, k) -> Store (ty, at a, at v, go sub pure [] k)
+  | Store (ty, a, v, k) ->
+    (* 他の番地の中身は分からなくなるが、書いた番地の中身は分かっている *)
+    Store (ty, at a, at v, go sub pure [ (ty, canon (at a)), at v ] k)
   | Out (p, v, k) -> Out (p, at v, go sub pure [] k)
   | Call (r, f, args, k) -> Call (r, f, List.map (fun (a, t) -> at a, t) args, go sub pure [] k)
   | LetK (ks, b) ->

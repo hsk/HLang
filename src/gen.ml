@@ -51,13 +51,16 @@ type ctx = {
   mutable dup : bool;                                  (* 継続の本体を、飛ぶ代わりに複製している最中 *)
   mutable tabs : ((int * string) list * string option * string) list;   (* 出した飛び先の表。複製どうしで共有する *)
   mutable next : (line * float) list Lazy.t;           (* いま出している項のすぐ後ろに並ぶコード（近い分だけ） *)
+  mutable last : string option;                        (* 計算してすぐ返すか渡すだけの変数。置き場所へは書かず、A か HL から使う *)
+  mutable held : (string * ty) option;                 (* 置き場所へ書かずに、A か HL にだけ持っている変数 *)
 }
 
 (* いまの状態を覚えて、そこへ戻す関数を返す *)
 let mark c =
   let out, ca, chl, zf, n, busy, ofs, w, data = c.out, c.ca, c.chl, c.zf, c.n, c.busy, c.ofs, c.w, c.data in
-  let norot, tabs, dup, wsel, hnear = c.norot, c.tabs, c.dup, c.wsel, c.hnear in
+  let norot, tabs, dup, wsel, hnear, held = c.norot, c.tabs, c.dup, c.wsel, c.hnear, c.held in
   fun () ->
+    c.held <- held;
     c.norot <- norot; c.tabs <- tabs; c.dup <- dup; c.wsel <- wsel; c.hnear <- hnear;
     c.out <- out; c.ca <- ca; c.chl <- chl; c.zf <- zf; c.n <- n; c.busy <- busy; c.ofs <- ofs;
     c.w <- w; c.data <- data; c.walking <- false
@@ -119,9 +122,10 @@ let raw c op args =
   if c.ofs <> 0 && not c.walking then begin
     match op, args with
     | "ret", [] -> c.ofs <- 0                           (* 戻るだけなら HL はもう要らない *)
+    | "ret", _ -> ()                                   (* 条件付き: 戻らなかったときは、進んだままの HL で続ける *)
     | ("ld" | "pop"), R "hl" :: rest when not (List.exists mentions rest) -> c.ofs <- 0   (* 上書き *)
     | "call", _ when List.mem "h" c.busy -> ()         (* 呼んだ先は HL を壊さない（壊すなら行き詰まっている） *)
-    | ("jp" | "call" | "djnz" | "ret"), _ -> if List.mem "h" c.busy then settle c else c.ofs <- 0
+    | ("jp" | "call" | "djnz"), _ -> if List.mem "h" c.busy then settle c else c.ofs <- 0
     | _ -> if List.exists mentions args then settle c
   end;
   push c op args
@@ -204,7 +208,7 @@ let to_hl c v =
 
 (* 計算結果（A か HL にある）を変数の置き場所へ *)
 let st c t x =
-  mv c t (loc c t (V x)) (Reg (if t = U8 then "a" else "hl"));
+  if c.last = Some x then c.held <- Some (x, t) else mv c t (loc c t (V x)) (Reg (if t = U8 then "a" else "hl"));
   if t = U8 then c.ca <- Some (V x) else c.chl <- Some (V x)
 
 (* A との演算の相手として使える形にする。メモリにあるなら HL で指す。 *)
@@ -563,6 +567,10 @@ let pmove c live ms =
   let same, rest = List.partition (fun (d, _, s, _) -> d = s) ms in
   go rest (dsts same)
 
+(* 配る値のありか。行き先が A（HL）で、値がもうそこに入っていると分かっていれば、動かさなくてよい *)
+let src c d t v =
+  if (d = Reg "a" && t = U8 && c.ca = Some v) || (d = Reg "hl" && t = U16 && c.chl = Some v) then d else loc c t v
+
 let klabel c k = I (Sym (c.f ^ "." ^ k))
 
 (* 何も移さずに飛べるか *)
@@ -570,10 +578,18 @@ let pure c k args =
   let ps, _ = Hashtbl.find c.konts k in
   List.for_all2 (fun (p, t) v -> loc c t (V p) = loc c t v) ps args
 
+(* 条件付きで継続へ飛ぶ。飛んだ先で HL の値が要らないなら、HL は進んだままでよい（戻す命令を出さない） *)
+let jcc c cc k =
+  let ps, live = Hashtbl.find c.konts k in
+  let in_hl x = List.exists (fun r -> r = "h" || r = "l") (places (c.home x)) in
+  if c.ofs <> 0 && not (SS.exists in_hl live || List.exists (fun (p, _) -> in_hl p) ps)
+  then push c "jp" [ R cc; klabel c k ]
+  else raw c "jp" [ R cc; klabel c k ]
+
 let show_home h = if is_mem h then "mem" else String.uppercase_ascii h
 let show_params c ps = String.concat ", " (List.map (fun (p, _) -> p ^ ": " ^ show_home (c.home p)) ps)
 
-let reset c = c.ca <- None; c.chl <- None; c.hnear <- None; c.zf <- None
+let reset c = c.ca <- None; c.chl <- None; c.hnear <- None; c.zf <- None; c.held <- None
 
 (* HL を本来の値 + n の位置へ動かす。以後、walking を下ろすまでの命令は進んだままの HL を使う。 *)
 let walk c n =
@@ -738,7 +754,8 @@ let rec term c (t : L.t) =
         in
         match ty, k.n with
         | U8, L.Let (y, U8, Bin (op, v, w), k2)
-          when (not (SS.mem x k2.lv)) && ((w = V x && v <> V x) || (v = V x && w <> V x && op <> "-")) ->
+          when (not (SS.mem x k2.lv)) && ((w = V x && v <> V x) || (v = V x && w <> V x && op <> "-"))
+               && step U8 op (if w = V x then v else w) = None ->                (* ±1 は読んでから inc/dec の方が安い *)
           (* 読んですぐ演算に使うなら、add a,(hl) や add a,(ix+d) の 1 命令にまとめる *)
           attempt c
             (fun () ->
@@ -810,7 +827,19 @@ let rec term c (t : L.t) =
         emit c "ld" [ M hl; src ];
         term c k)
       (fun () -> exp c m U16 e t.lv (SS.remove m inner.lv); term c inner)
-  | L.Let (x, ty, e, k) -> exp c x ty e t.lv (SS.remove x k.lv); term c k
+  | L.Let (x, ty, e, k) ->
+    (* 次の行で返すか、関数に渡して終わりの値なら、置き場所へ書くのは無駄 *)
+    let brief =
+      match k.n with
+      | L.Ret (Some (V y, _)) -> y = x
+      | L.Call (r, _, args, k2) ->
+        List.exists (fun (v, _) -> v = V x) args
+        && not (SS.mem x (match r with Some (y, _) -> SS.remove y k2.lv | None -> k2.lv))
+      | _ -> false
+    in
+    if brief then c.last <- Some x;
+    Fun.protect ~finally:(fun () -> c.last <- None) (fun () -> exp c x ty e t.lv (SS.remove x k.lv));
+    term c k
   | L.Store (U8, p, v, k) ->
     set_live c t.lv;
     (match loc c U16 p with
@@ -866,7 +895,24 @@ let rec term c (t : L.t) =
       | Some (x, _), L.Ret (Some (V y, _)) -> x = y
       | _ -> false
     in
-    pmove c (if tail then SS.empty else after) (List.map2 (fun d (v, t) -> d, t, loc c t v, None) dsts args);
+    let live = if tail then SS.empty else after in
+    let plain () = pmove c live (List.map2 (fun d (v, t) -> d, t, loc c t v, None) dsts args) in
+    let cached () = pmove c live (List.map2 (fun d (v, t) -> d, t, src c d t v, None) dsts args) in
+    (* 置き場所へ書かずに持っている値は、A（HL）で渡すならそのまま。そうでなければ、ここで書いてから配る *)
+    let flush () =
+      match c.held with
+      | Some (x, ty) ->
+        c.held <- None;
+        set_live c (SS.remove x t.lv);
+        mv c ty (loc c ty (V x)) (Reg (if ty = U8 then "a" else "hl"))
+      | None -> ()
+    in
+    (match c.held with
+     | Some (x, _) when List.for_all2 (fun d (v, _) -> v <> V x || d = Reg "a" || d = Reg "hl") dsts args ->
+       attempt c cached (fun () -> flush (); plain ())
+     | Some _ -> flush (); plain ()
+     | None -> attempt c cached plain);
+    c.held <- None;
     if tail then raw c "jp" [ target ]               (* 末尾呼び出し: 戻り番地を積まずに飛ぶ *)
     else begin
     set_live c after;
@@ -1055,9 +1101,9 @@ let rec term c (t : L.t) =
     let cc = compare c o ty x y in
     c.zf <- None;                                     (* 分岐の先ではフラグを当てにしない *)
     (match yes.n, no.n with
-     | L.Jump (k, args), _ when pure c k args -> raw c "jp" [ R cc; klabel c k ]; term c no
+     | L.Jump (k, args), _ when pure c k args -> jcc c cc k; term c no
      | L.Ret None, _ when not c.task -> raw c "ret" [ R cc ]; term c no
-     | _, L.Jump (k, args) when pure c k args -> raw c "jp" [ R (neg_cc cc); klabel c k ]; term c yes
+     | _, L.Jump (k, args) when pure c k args -> jcc c (neg_cc cc) k; term c yes
      | _, L.Ret None when not c.task -> raw c "ret" [ R (neg_cc cc) ]; term c yes
      | _ ->
        let l = fresh c "else" in
@@ -1091,13 +1137,14 @@ let rec term c (t : L.t) =
   | L.Ret (Some (v, ty)) ->
     set_live c t.lv;
     if ty = U8 then to_a c v else to_hl c v;
+    c.held <- None;
     raw c "ret" []
 
 (* 関数 1 つ。home が置き場所の割り当て。出せなければ Stuck。 *)
 let fn ~info ~exts ~home ~pick (f : Ir.fn) (body : L.t) : (line * float) list * line list =
   let c = { f = f.name; task = f.task; self = f.self; home; konts = Hashtbl.create 16; info; exts; out = []; w = 1.;
             busy = []; ca = None; chl = None; hnear = None; zf = None; n = 0;
-            heads = Hashtbl.create 8; norot = false; pick; data = []; bodies = Hashtbl.create 16; wsel = None; dup = false; tabs = []; next = lazy []; ofs = 0; walking = false } in
+            heads = Hashtbl.create 8; norot = false; pick; data = []; bodies = Hashtbl.create 16; wsel = None; dup = false; tabs = []; next = lazy []; ofs = 0; walking = false; last = None; held = None } in
   (* 引数どうしが同じ場所を取り合っていないこと *)
   let rec distinct = function
     | [] -> ()
