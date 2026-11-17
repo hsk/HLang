@@ -8,7 +8,8 @@
    1. x & m（m <= 0xff）: 下位バイトだけを 8bit で計算して、zext する。足し算・引き算・論理演算・左シフトの
       下位バイトは、元の値の下位バイトだけで決まる。
    2. (zext b) >> n: b >> n を 8bit で計算して、zext する。
-   3. (mem16[a] >> 8) を使うのが 1 か所だけなら、mem[a + 1] の 1 バイトを読む（上位バイトはメモリでは後ろ）。
+   3. 16bit の読み mem16[a] の使い方が、全部「下位 (trunc)」か「上位 (>> 8)」なら、mem[a] と mem[a + 1] を
+      1 バイトずつ読む（上位バイトはメモリでは後ろ）。
    4. trunc (zext b) は b。
    置き換えた後に使われなくなった読み（mem16[a]）は消す。 *)
 
@@ -43,8 +44,25 @@ let uses body =
 
 let id t = t
 
+(* 変数ごとに、「trunc x」か「x >> 8」として使われる回数 *)
+let byte_uses body =
+  let n = Hashtbl.create 16 in
+  let add x = Hashtbl.replace n x (1 + Option.value ~default:0 (Hashtbl.find_opt n x)) in
+  let rec go = function
+    | Let (_, _, (Trunc (V x) | Sh (">>", V x, 8)), k) -> add x; go k
+    | Let (_, _, _, k) | Store (_, _, _, k) | Out (_, _, k) | Call (_, _, _, k) | Yield k -> go k
+    | LetK (ks, b) -> List.iter (fun (k : kont) -> go k.body) ks; go b
+    | If (_, _, _, _, y, n) -> go y; go n
+    | Jump _ | Switch _ | Ret _ -> ()
+  in
+  go body;
+  fun x -> Option.value ~default:0 (Hashtbl.find_opt n x)
+
 let narrow body =
   let used = uses body in
+  let bytes = byte_uses body in
+  (* 16bit の読みを、1 バイトずつの読みに分けられるか: 使い方が全部 trunc か >> 8 *)
+  let bytewise m = used m > 0 && bytes m = used m in
   let defs = Hashtbl.create 64 in
   let def = function V x -> Hashtbl.find_opt defs x | _ -> None in
   let let8 e = let z = fresh () in (fun t -> Let (z, U8, e, t)), V z in
@@ -86,11 +104,14 @@ let narrow body =
          let b = match def y with Some (_, Zext b) -> b | _ -> assert false in
          let w, z = let8 (Sh (">>", b, n)) in
          w (bind (Zext z))
-       | U16, Sh (">>", (V m as y), 8) when used m = 1 && (match def y with Some (U16, Load _) -> true | _ -> false) ->
+       | U16, Sh (">>", (V m as y), 8) when bytewise m && (match def y with Some (U16, Load _) -> true | _ -> false) ->
          let a = match def y with Some (_, Load a) -> a | _ -> assert false in
          let w, a1 = next a in
          let w2, z = let8 (Load a1) in
          w (w2 (bind (Zext z)))
+       | U8, Trunc (V m as y) when bytewise m && (match def y with Some (U16, Load _) -> true | _ -> false) ->
+         let a = match def y with Some (_, Load a) -> a | _ -> assert false in
+         bind (Load a)
        | U8, Trunc y when (match def y with Some (U16, Zext _) -> true | _ -> false) ->
          let b = match def y with Some (_, Zext b) -> b | _ -> assert false in
          bind (Atom b)

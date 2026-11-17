@@ -508,6 +508,10 @@ let rec exp c x t e (before : SS.t) (after : SS.t) =
     if is_mem hx then st c U16 x
   | U16, Load p ->
     (match loc c U16 p, hx with
+     | Reg (("ix" | "iy") as r), ("de" | "bc" | "hl") ->
+       go ();
+       emit c "ld" [ R (lo hx); M (X (r, Num 0)) ];
+       emit c "ld" [ R (hi hx); M (X (r, Num 1)) ]
      | Imm e, _ ->
        go ();
        if is_mem hx then (emit c "ld" [ hl; M (I e) ]; st c U16 x) else emit c "ld" [ R hx; M (I e) ]
@@ -867,6 +871,9 @@ let rec term c (t : L.t) =
     (match loc c U16 p with
      | Imm e -> to_a c v; emit c "ld" [ M (I e); a ]
      | Reg (("de" | "bc") as r) -> to_a c v; emit c "ld" [ M (R r); a ]
+     | Reg (("ix" | "iy") as r) ->
+       let src = match loc c U8 v with Reg r8 -> R r8 | Imm e -> I e | Slot _ -> to_a c v; a in
+       emit c "ld" [ M (X (r, Num 0)); src ]
      | _ ->
        to_hl c p;
        (match loc c U8 v with

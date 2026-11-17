@@ -84,12 +84,63 @@ let walk (lk : kont) starts =
      | _ -> None)
   | _ -> None
 
+(* 添字が回数を数えるだけになったループ（for i in 0..n で、本体が i を使わない）は、n から 0 へ数え下ろす。
+   判定が「0 でないか」になり、dec のフラグで決まる。B に置けば djnz 1 つ（13T）。
+   上へ数えると inc b / ld a,b / cp n / jp c（25T）かかり、A も使う。抜けた後の i は n。 *)
+(* 項の中のジャンプを置き換える *)
+let rec map_jumps f = function
+  | Let (x, ty, e, k) -> Let (x, ty, e, map_jumps f k)
+  | Store (ty, a, v, k) -> Store (ty, a, v, map_jumps f k)
+  | Out (p, v, k) -> Out (p, v, map_jumps f k)
+  | Call (r, g, args, k) -> Call (r, g, args, map_jumps f k)
+  | LetK (ks, b) -> LetK (List.map (fun (k : kont) -> { k with body = map_jumps f k.body }) ks, map_jumps f b)
+  | Jump (k, args) -> f k args
+  | If (o, ty, a, b, y, n) -> If (o, ty, a, b, map_jumps f y, map_jumps f n)
+  | Yield k -> Yield (map_jumps f k)
+  | (Switch _ | Ret _) as t -> t
+
+(* let を並べた後の、最後のジャンプ *)
+let rec final = function Let (_, _, _, k) -> final k | Jump (k, args) -> Some (k, args) | _ -> None
+
+let down (lk : kont) starts =
+  match lk.body with
+  | If ("<", U8, V i, C n, LetK ([ nx ], stmts), (Jump (dn, eargs) as _els)) when n >= 1 && n <= 255 ->
+    (match index i 0 lk.ps, nx.body with
+     | Some pi, Let (i', U8, Bin ("+", V ix, C 1), j)
+       when (match final j with Some (lp, args) -> lp = lk.k && List.nth args pi = V i' | None -> false)
+            && List.nth starts pi = C 0 && List.mem_assoc ix nx.ps
+            && (let nxp = match index ix 0 nx.ps with Some k -> k | None -> -1 in
+                (* next へ i をそのまま渡す所は、数えるのに使っているだけ *)
+                let strip = map_jumps (fun k args ->
+                    Jump (k, if k = nx.k then List.mapi (fun j a -> if j = nxp && a = V i then C 0 else a) args else args)) in
+                not (Blk.used i (strip stmts))) ->
+       let eargs = List.map (fun a -> if a = V i then C n else a) eargs in
+       (* 数を減らすのは最後にする。dec の直後に飛ぶので、djnz 1 つになる *)
+       let rec last = function
+         | Let (x, ty, e, k) -> Let (x, ty, e, last k)
+         | t -> Let (i', U8, Bin ("-", V ix, C 1), t)
+       in
+       let nx = { nx with body = last j } in
+       let body = If ("!=", U8, V i, C 0, LetK ([ nx ], stmts), Jump (dn, eargs)) in
+       Some ({ lk with body }, List.mapi (fun k a -> if k = pi then C n else a) starts)
+     | _ -> None)
+  | _ -> None
+
 let rec go = function
   | LetK ([ dk ], LetK ([ lk ], Jump (lp, starts))) when lk.k = lp ->
     let dk = { dk with body = go dk.body } in
     let lk = { lk with body = go lk.body } in
-    (match walk lk starts with
-     | Some (lk, starts) -> LetK ([ dk ], LetK ([ lk ], Jump (lp, starts)))
+    let lk, starts = match walk lk starts with Some r -> r | None -> lk, starts in
+    let lk = { lk with body = Narrow.drop lk.body } in        (* 置き換えで使われなくなった掛け算を消す *)
+    (match down lk starts with
+     | Some (lk, starts) ->
+       (* 抜けた後の i が使われないなら、done の引数から外す（定数を置き場所へ入れる手間が要らない） *)
+       let unused = List.mapi (fun j (x, _) -> j, not (Blk.used x dk.body)) dk.ps in
+       let keep j = not (List.assoc j unused) in
+       let dk = { dk with ps = List.filteri (fun j _ -> keep j) dk.ps } in
+       let lk = { lk with body = map_jumps (fun k args ->
+           Jump (k, if k = dk.k then List.filteri (fun j _ -> keep j) args else args)) lk.body } in
+       LetK ([ dk ], LetK ([ lk ], Jump (lp, starts)))
      | None -> LetK ([ dk ], LetK ([ lk ], Jump (lp, starts))))
   | LetK (ks, entry) -> LetK (List.map (fun (k : kont) -> { k with body = go k.body }) ks, go entry)
   | Let (x, ty, e, k) -> Let (x, ty, e, go k)

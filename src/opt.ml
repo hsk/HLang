@@ -104,7 +104,7 @@ let rec go sub pure loads t =
       | None -> []
     in
     Store (ty, a, at v, go sub pure (((ty, canon a), at v) :: kept) k)
-  | Out (p, v, k) -> Out (p, at v, go sub pure [] k)
+  | Out (p, v, k) -> Out (p, at v, go sub pure loads k)      (* ポートへの書き込みは、メモリを変えない *)
   | Call (r, f, args, k) -> Call (r, f, List.map (fun (a, t) -> at a, t) args, go sub pure [] k)
   | LetK (ks, b) ->
     (* 継続にはどこから飛んでくるか分からないので、メモリの内容は当てにしない *)

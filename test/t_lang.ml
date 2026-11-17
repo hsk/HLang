@@ -546,6 +546,17 @@ fn main() {
   puth(hi(&p))
   puth(both(&p))
 }|}, "00e0 001b 0010 0004 0039 00fc 00ab 1246 ";
+  "数を数えるだけのループ（djnz）", {|
+struct S { a: u8, b: u8, c: u8 }
+var ss: [S; 5]
+fn main() {
+  for i in 0..5 { ss[i].a = i  ss[i].b = i * 2 }       // i を使う
+  var n: u8 = 0
+  for i in 0..5 { if ss[i].a == 3 { break }  n += ss[i].b  putc('0' + ss[i].a) }   // 数えるだけ、break あり
+  puth(n)
+  for i in 0..5 { if ss[i].a == 1 { continue }  ss[i].c = 7 }                       // continue あり
+  for i in 0..5 { putc('0' + ss[i].c) }
+}|}, "0120006 70777";
   "符号付きの数", {|
 var gv: i8 = -3
 fn sign(v: i8) -> u8 { if v < 0 { return '-' }  if v == 0 { return '0' }  return '+' }
