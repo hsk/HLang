@@ -7,6 +7,9 @@ type e =                         (* アセンブル時に決まる式 *)
   | Add of e * e
   | Lo of e
   | Hi of e
+  | Bop of string * e * e        (* 二項演算（ZMA の式）: + - * / % << >> & | ^ == != < > <= >= && || *)
+  | Uop of string * e            (* 単項演算: - ~ ! *)
+  | Here                         (* $: いま組み立てている行の番地 *)
 
 type arg =
   | R of string                  (* レジスタ名か条件名: a hl nz ... *)
@@ -37,26 +40,30 @@ let rec show_e = function
   | Add (a, b) -> show_e a ^ "+" ^ show_e b
   | Lo a -> "(" ^ show_e a ^ ")&255"
   | Hi a -> "(" ^ show_e a ^ ")>>8"
+  | Bop (o, a, b) -> Printf.sprintf "(%s %s %s)" (show_e a) o (show_e b)
+  | Uop (o, a) -> Printf.sprintf "(%s%s)" o (show_e a)
+  | Here -> "$"
 
-let rec show_arg = function
+(* z を付けると ZMA の書き方（メモリ参照は [..]、定数は :=、データは defb / defw / space）にする *)
+let rec show_arg ?(z = false) = function
   | R r -> r
   | I e -> show_e e
-  | M a -> "(" ^ show_arg a ^ ")"
+  | M a -> let s = show_arg ~z a in if z then "[" ^ s ^ "]" else "(" ^ s ^ ")"
   | X (r, Num d) when d < 0 -> Printf.sprintf "%s-%d" r (-d)
   | X (r, e) -> r ^ "+" ^ show_e e
 
-let show_ins (op, args) =
-  if args = [] then op else op ^ " " ^ String.concat "," (List.map show_arg args)
+let show_ins ?(z = false) (op, args) =
+  if args = [] then op else op ^ " " ^ String.concat "," (List.map (show_arg ~z) args)
 
-let show = function
-  | Ins (op, args) -> "    " ^ show_ins (op, args)
+let show ?(z = false) = function
+  | Ins (op, args) -> "    " ^ show_ins ~z (op, args)
   | Label l -> l ^ ":"
-  | Db es -> "    db " ^ String.concat "," (List.map show_e es)
-  | Dw es -> "    dw " ^ String.concat "," (List.map show_e es)
-  | Ds n -> Printf.sprintf "    ds %d" n
+  | Db es -> "    " ^ (if z then "defb " else "db ") ^ String.concat "," (List.map show_e es)
+  | Dw es -> "    " ^ (if z then "defw " else "dw ") ^ String.concat "," (List.map show_e es)
+  | Ds n -> Printf.sprintf (if z then "    space %d" else "    ds %d") n
   | Align n -> Printf.sprintf "    align %d" n
   | Fit n -> Printf.sprintf "    fit %d" n
-  | Equ (l, e) -> Printf.sprintf "%s: equ %s" l (show_e e)
+  | Equ (l, e) -> if z then Printf.sprintf "%s := %s" l (show_e e) else Printf.sprintf "%s: equ %s" l (show_e e)
   | Rem s -> "; " ^ s
 
 (* ---- オペランドの分類。番号は命令コードの y, z, p にそのまま入る ---- *)
@@ -243,12 +250,26 @@ let writes (op, args) =
 
 (* ---- 全体を組み立てる。2 回なめる: 1 回目で番地を決め、2 回目で値を埋める ---- *)
 
-let rec eval look = function
+let rec eval look pc = function
   | Num n -> n
   | Sym s -> look s
-  | Add (a, b) -> eval look a + eval look b
-  | Lo a -> eval look a land 0xff
-  | Hi a -> eval look a lsr 8 land 0xff
+  | Add (a, b) -> eval look pc a + eval look pc b
+  | Lo a -> eval look pc a land 0xff
+  | Hi a -> eval look pc a lsr 8 land 0xff
+  | Here -> pc
+  | Uop (o, a) ->
+    let x = eval look pc a in
+    (match o with "-" -> -x | "~" -> lnot x | _ -> Bool.to_int (x = 0))
+  | Bop (o, a, b) ->
+    let x = eval look pc a and y = eval look pc b in
+    let t c = Bool.to_int c in
+    (match o with
+     | "+" -> x + y | "-" -> x - y | "*" -> x * y
+     | "/" | "%" -> if y = 0 then err "0 で割った" else if o = "/" then x / y else x mod y
+     | "<<" -> x lsl y | ">>" -> x asr y | "&" -> x land y | "|" -> x lor y | "^" -> x lxor y
+     | "==" -> t (x = y) | "!=" -> t (x <> y) | "<" -> t (x < y) | ">" -> t (x > y) | "<=" -> t (x <= y) | ">=" -> t (x >= y)
+     | "&&" -> t (x <> 0 && y <> 0) | "||" -> t (x <> 0 || y <> 0)
+     | _ -> err "知らない演算: %s" o)
 
 let assemble ?(org = 0) lines =
   let syms = Hashtbl.create 64 in
@@ -260,10 +281,13 @@ let assemble ?(org = 0) lines =
       | Some a -> a
       | None -> if final then err "未定義のラベル: %s" s else pc ()
     in
-    let v = eval look in
+    let at = ref org in                                   (* 行の先頭の番地。式の $ になる *)
+    let v e = eval look !at e in
     let byte b = Buffer.add_char buf (Char.chr (b land 0xff)) in
     List.iter
-      (function
+      (fun l ->
+        at := pc ();
+        match l with
         | Ins (op, args) -> List.iter byte (enc v (pc ()) (op, args))
         | Label l ->
           if (not final) && Hashtbl.mem syms l then err "ラベルが重複: %s" l;
@@ -282,4 +306,4 @@ let assemble ?(org = 0) lines =
   let bin = pass true in
   bin, Hashtbl.fold (fun k a l -> (k, a) :: l) syms []
 
-let listing lines = String.concat "\n" (List.map show lines) ^ "\n"
+let listing ?(z = false) lines = String.concat "\n" (List.map (show ~z) lines) ^ "\n"

@@ -6,20 +6,31 @@
      hlc file.hl --run      エミュレータで走らせ、MSX の文字出力 (CHPUT) を表示
      hlc file.hl --report   関数ごとの大きさ、呼び出し規約、時間の上限、RAM の使い道を表示
      -O0 を付けると最適化しない（変数をすべてメモリに置く）
-     -sms を付けると、セガ・マスターシステムの ROM（file.sms）を作る *)
+     -sms を付けると、セガ・マスターシステムの ROM（file.sms）を作る
+     hlc file.hl --zma      ZMA の書き方のアセンブリを表示（HRA! さんの zma で組み立てられる）
+     hlc file.zma           ZMA（.zma .asm .z80 .a80）を組み立てて file.bin を作る
+                              --org N  開始番地（ファイルに org があればそちら）  -Dname=値  定数を決める  -Ipath  INCLUDE を探す所
+     hlc file.bin --dis     機械語を ZMA の書き方で逆アセンブル（コメントに番地と機械語）
+                              --org N（.rom は 0x4000、それ以外は 0）  --db 始め-終わり  その範囲は命令でなく defb にする *)
 
 open Hlang
 
 let () =
   let file = ref "" and mode = ref "rom" and opt = ref true and target = ref msx in
-  Array.iteri
-    (fun i a ->
-      if i > 0 then
-        if a = "-O0" then opt := false
-        else if a = "-sms" then target := sms
-        else if String.length a > 2 && String.sub a 0 2 = "--" then mode := String.sub a 2 (String.length a - 2)
-        else file := a)
-    Sys.argv;
+  let org = ref None and data = ref [] and defs = ref [] and incs = ref [] in
+  let rec args = function
+    | [] -> ()
+    | "-O0" :: r -> opt := false; args r
+    | "-sms" :: r -> target := sms; args r
+    | "--org" :: v :: r -> org := Some (int_of_string v); args r
+    | "--db" :: v :: r -> Scanf.sscanf v "%i-%i" (fun a b -> data := (a, b) :: !data); args r
+    | a :: r when String.starts_with ~prefix:"-D" a ->
+      Scanf.sscanf (String.sub a 2 (String.length a - 2)) "%[^=]=%i" (fun k v -> defs := (k, v) :: !defs); args r
+    | a :: r when String.starts_with ~prefix:"-I" a -> incs := String.sub a 2 (String.length a - 2) :: !incs; args r
+    | a :: r when String.length a > 2 && String.sub a 0 2 = "--" -> mode := String.sub a 2 (String.length a - 2); args r
+    | a :: r -> file := a; args r
+  in
+  args (List.tl (Array.to_list Sys.argv));
   if !file = "" then (prerr_endline "使い方: hlc file.hl [--asm|--ir|--list|--run]"; exit 2);
   let slurp f =
     let ic = open_in_bin f in
@@ -36,6 +47,31 @@ let () =
     | Some p -> slurp p
     | None -> raise (Ast.Error (0, "import するファイルがない: " ^ f))
   in
+  let ext = String.lowercase_ascii (Filename.extension !file) in
+  let fail line msg = Printf.eprintf "%s%s\n" (if line > 0 then Printf.sprintf "%s:%d: " !file line else "") msg; exit 1 in
+  if !mode = "dis" then begin
+    let bin = slurp !file in
+    let org = match !org with Some o -> o | None -> if ext = ".rom" then 0x4000 else 0 in
+    print_string (Dis.zma ~org ~data:!data bin);
+    exit 0
+  end;
+  if List.mem ext [ ".zma"; ".asm"; ".z80"; ".a80" ] then begin
+    let dirs = Filename.dirname !file :: List.rev !incs in
+    let rd f =
+      match List.find_opt Sys.file_exists (List.map (fun d -> Filename.concat d f) dirs) with
+      | Some p -> slurp p
+      | None -> raise (Asm.Error ("ファイルがない: " ^ f))
+    in
+    match Zma.assemble ?org:!org ~read:rd ~defs:!defs (slurp !file) with
+    | exception Asm.Error m -> fail 0 m
+    | org, bin, _ ->
+      let out = Filename.remove_extension !file ^ ".bin" in
+      let oc = open_out_bin out in
+      output_string oc bin;
+      close_out oc;
+      Printf.printf "%s: %d バイト（番地 0x%x から）\n" out (String.length bin) org;
+      exit 0
+  end;
   match compile ~target:!target ~opt:!opt ~read (slurp !file) with
   | exception Ast.Error (line, msg) ->
     let f, line = where line in
@@ -44,6 +80,7 @@ let () =
   | r ->
     (match !mode with
      | "asm" -> print_string (Asm.listing r.asm)
+     | "zma" -> Printf.printf "    org 0x%x\n%s" r.org (Asm.listing ~z:true r.asm)
      | "ir" -> List.iter (fun f -> print_string (Ir.show f); print_newline ()) r.ir
      | "list" -> print_string (Dis.listing ~org:r.org r.bin)
      | "report" ->

@@ -125,3 +125,67 @@ let listing ?(org = 0) bin =
     pc := !pc + len
   done;
   Buffer.contents buf
+
+(* ---- ZMA 形式にする。組み立て直せる形（Zma.parse が読める）で、コメントに番地と機械語を付ける ---- *)
+
+(* image の外を呼ぶ・飛ぶときの名前（MSX の BIOS）と、ポートの名前 *)
+let bios = [ 0x47, "wrtvdp"; 0x4a, "rdvrm"; 0x4d, "wrtvrm"; 0x56, "filvrm"; 0x5c, "ldirvm"; 0x5f, "chgmod"; 0x62, "chgclr";
+             0x90, "gicini"; 0x93, "wrtpsg"; 0x96, "rdpsg"; 0xa2, "chput"; 0xc6, "posit"; 0xd5, "gtstck"; 0xd8, "gttrig"; 0x141, "snsmat" ]
+let ports = [ 0x98, "MSX VDP data"; 0x99, "MSX VDP ctrl"; 0xa0, "MSX PSG addr"; 0xa1, "MSX PSG data"; 0xa8, "MSX slot";
+              0xbe, "SMS VDP data"; 0xbf, "SMS VDP ctrl"; 0x7f, "SMS PSG"; 0xdc, "SMS pad 1" ]
+
+(* data: 命令にせず db にする範囲 (始め, 終わり)。データの表を命令として読まないために使う *)
+let zma ?(org = 0) ?(data = []) bin =
+  let ends = org + String.length bin in
+  let rd a = Char.code bin.[a - org] in
+  let in_data a = List.exists (fun (lo, hi) -> a >= lo && a < hi) data in
+  let db pc = Db [ Num (rd pc) ], 1 in
+  let rec scan pc =
+    if pc >= ends then []
+    else begin
+      let line, len =
+        if in_data pc then begin                      (* 範囲の中は 8 バイトずつ db *)
+          let hi = List.fold_left (fun m (lo, hi) -> if pc >= lo && pc < hi then hi else m) pc data in
+          let k = min 8 (min hi ends - pc) in
+          Db (List.init k (fun i -> Num (rd (pc + i)))), k
+        end else
+          match dis rd pc with
+          | (Ins _, len) as r when not (List.exists in_data (List.init (len - 1) (fun i -> pc + i + 1))) -> r
+          | _ -> db pc
+          | exception Invalid_argument _ -> db pc
+      in
+      (pc, line, len) :: scan (pc + len)
+    end
+  in
+  let code = scan org in
+  let start = Hashtbl.create 64 in
+  List.iter (fun (pc, _, _) -> Hashtbl.replace start pc ()) code;
+  let name t = Printf.sprintf "L%04x" t in
+  let jumps = [ "jp"; "jr"; "call"; "djnz" ] in
+  let target = function
+    | Ins (op, args) when List.mem op jumps ->
+      (match List.rev args with I (Num t) :: _ when t >= org && t < ends && Hashtbl.mem start t -> Some t | _ -> None)
+    | _ -> None
+  in
+  let labelled = Hashtbl.create 64 in
+  List.iter (fun (_, l, _) -> Option.iter (fun t -> Hashtbl.replace labelled t ()) (target l)) code;
+  let b = Buffer.create 4096 in
+  Printf.bprintf b "; ZMA 形式（HRA! さんの zma で組み立て直せる書き方）の逆アセンブル（%d バイト、番地 0x%04x〜0x%04x）。\n; 行末のコメントは「番地: 機械語」。L で始まる名前は、飛び先から付けたラベル。\n    org 0x%x\n" (String.length bin) org (ends - 1) org;
+  List.iter
+    (fun (pc, line, len) ->
+      if Hashtbl.mem labelled pc then Printf.bprintf b "%s:\n" (name pc);
+      let line = match line, target line with
+        | Ins (op, args), Some t -> Ins (op, List.rev (match List.rev args with _ :: r -> I (Sym (name t)) :: r | [] -> []))
+        | l, _ -> l
+      in
+      let hex = String.concat " " (List.init len (fun i -> Printf.sprintf "%02x" (rd (pc + i)))) in
+      let hint =
+        match line with
+        | Ins (("call" | "jp"), [ I (Num t) ]) -> Option.map (fun n -> "BIOS " ^ n) (List.assoc_opt t bios)
+        | Ins (("in" | "out"), args) ->
+          List.find_map (function M (I (Num p)) -> List.assoc_opt p ports | _ -> None) args
+        | _ -> None
+      in
+      Printf.bprintf b "%-32s; %04x: %s%s\n" (show ~z:true line) pc hex (match hint with Some h -> "  " ^ h | None -> ""))
+    code;
+  Buffer.contents b

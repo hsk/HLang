@@ -101,5 +101,6 @@ dune test                                          # 全テスト
 - [docs/making.md](docs/making.md)：コンパイラの作り方（章立ての入口）
 - [docs/wsl.md](docs/wsl.md)：Windows（WSL）で使う
 - [docs/windows.md](docs/windows.md)：Windows のネイティブ（PowerShell）で使う
+- [docs/09-zma.md](docs/09-zma.md)：ZMA（HRA! さんのアセンブラ）の書き方を読む・書く
 - [plan.md](plan.md)：計画と進み具合、残っていること
 - [concept.md](concept.md)：構想と、先行する実装の調査記録

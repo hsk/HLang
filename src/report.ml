@@ -18,7 +18,7 @@ exception Loop
 let rec longest code tables (callee : string -> bound) ext starts =
   let at = Hashtbl.create 32 in
   Array.iteri (fun i l -> match l with Label s -> Hashtbl.replace at s i | _ -> ()) code;
-  let rec syms acc = function Sym s -> s :: acc | Add (a, b) -> syms (syms acc a) b | Lo a | Hi a -> syms acc a | Num _ -> acc in
+  let rec syms acc = function Sym s -> s :: acc | Add (a, b) -> syms (syms acc a) b | Lo a | Hi a | Uop (_, a) -> syms acc a | Bop (_, a, b) -> syms (syms acc a) b | Num _ | Here -> acc in
   let targets = List.concat_map (function Db es -> List.fold_left syms [] es | _ -> []) tables in
   let memo = Array.make (Array.length code + 1) (-1) and busy = Array.make (Array.length code + 1) false in
   let rec go i =

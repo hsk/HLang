@@ -31,7 +31,9 @@ let rec first = function                     (* ラベルやコメントを飛�
 let rec refs_e acc = function
   | Sym s -> s :: acc
   | Add (x, y) -> refs_e (refs_e acc x) y
-  | Lo x | Hi x -> refs_e acc x
+  | Lo x | Hi x | Uop (_, x) -> refs_e acc x
+  | Bop (_, x, y) -> refs_e (refs_e acc x) y
+  | Here -> acc
   | Num _ -> acc
 
 let rec refs_arg acc = function I e | X (_, e) -> refs_e acc e | M x -> refs_arg acc x | R _ -> acc
@@ -413,7 +415,9 @@ let program ~opt (tg : target) (p : Check.prog) (fns : Ir.fn list) : line list =
   let rec syms = function
     | Sym s -> Hashtbl.replace used s ()
     | Add (x, y) -> syms x; syms y
-    | Lo x | Hi x -> syms x
+    | Lo x | Hi x | Uop (_, x) -> syms x
+    | Bop (_, x, y) -> syms x; syms y
+    | Here -> ()
     | Num _ -> ()
   in
   let rec arg = function I e -> syms e | M x -> arg x | X (_, e) -> syms e | R _ -> () in

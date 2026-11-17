@@ -2,6 +2,8 @@
 
 module Asm = Asm
 module Dis = Dis
+module Zma = Zma
+
 module Cost = Cost
 module Ast = Ast
 module Parse = Parse
