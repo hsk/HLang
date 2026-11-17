@@ -439,6 +439,12 @@ let rec exp c x t e (before : SS.t) (after : SS.t) =
       | V u, Some (u', k) when u = u' && c.hnear = was -> c.hnear <- Some (x, k - n)
       | _ -> ()
     end
+  | U16, Bin ("+", V p, C n) when is_x hx && c.home p = hx ->
+    (* IX/IY をその場で進める（構造体の配列を歩くとき）。HL を通さない *)
+    go ();
+    let r = scratch c [] [ "de"; "bc" ] in
+    emit c "ld" [ R r; I (Num n) ];
+    emit c "add" [ R hx; R r ]
   | U16, Bin ("-", v, C n) -> exp_add c x v (C (-n land 0xffff)) go
   | U16, Bin ("+", v, w) -> exp_add c x v w go
   | U16, Bin ("-", v, w) ->

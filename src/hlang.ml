@@ -97,7 +97,7 @@ let compile ?(target = msx) ?(opt = true) ?read src =
     | _, Some (_, t, vs) -> Some (List.length vs * w t)
     | None, None -> None
   in
-  let ir = if opt then List.map (fun f -> Opt.fn (Ptr.fn size (Blk.fn (Opt.fn f)))) ir else ir in
+  let ir = if opt then List.map (fun f -> Opt.fn (Ptr.fn size (Iv.fn (Blk.fn (Opt.fn f))))) ir else ir in
   let asm = Alloc.program ~opt target prog ir in
   let bin, syms =
     try Asm.assemble ~org:target.org asm with Asm.Error m -> raise (Ast.Error (0, m))

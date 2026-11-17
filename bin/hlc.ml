@@ -3,6 +3,7 @@
      hlc file.hl --asm      アセンブリを表示
      hlc file.hl --ir       中間表現を表示
      hlc file.hl --list     番地と機械語つきの一覧を表示
+     hlc file.hl --syms     ラベルと番地の表を、番地の順に表示（プロファイルで番地を関数名に直すのに使う）
      hlc file.hl --run      エミュレータで走らせ、MSX の文字出力 (CHPUT) を表示
      hlc file.hl --report   関数ごとの大きさ、呼び出し規約、時間の上限、RAM の使い道を表示
      -O0 を付けると最適化しない（変数をすべてメモリに置く）
@@ -83,6 +84,8 @@ let () =
      | "zma" -> Printf.printf "    org 0x%x\n%s" r.org (Asm.listing ~z:true r.asm)
      | "ir" -> List.iter (fun f -> print_string (Ir.show f); print_newline ()) r.ir
      | "list" -> print_string (Dis.listing ~org:r.org r.bin)
+     | "syms" ->
+       List.iter (fun (l, a) -> Printf.printf "%04x %s\n" a l) (List.sort (fun (_, a) (_, b) -> compare a b) r.syms)
      | "report" ->
        let up = String.uppercase_ascii in
        let home h = if Gen.is_mem h then "メモリ" else up h in

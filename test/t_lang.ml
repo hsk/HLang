@@ -510,6 +510,21 @@ fn main() {
   send5(&buf)  recv4d(&buf)
   show()
 }|}, "[98:1][98:2][98:3][98:4][98:3][98:2][98:1]00a0 00a7 00ae 0004 00c3 00bc 00b5 0008 [98:a0][98:a7][98:ae][98:4][98:c3]00df 00d8 00d1 00ca 00c3 00bc 00b5 0008 ";
+  "構造体の配列を歩くループ", {|
+struct E { a: u8, w: u16, b: u8 }
+var es: [E; 6]
+fn sum() -> u16 {
+  var s: u16 = 0
+  for i in 0..6 { if es[i].a == 2 { continue }  s += es[i].w  s += es[i].b }
+  return s
+}
+fn main() {
+  for i in 1..6 { es[i].a = i  var v: u16 = i  es[i].w = v * 100  es[i].b = i + 1 }   // 1 から始まる
+  puth(sum())
+  for i in 0..6 { for j in 0..6 { if es[j].a == i { es[j].b += 1 } } }                // 入れ子
+  puth(sum())
+  for i in 0..6 { puth(es[i].b) }
+}|}, "0525 052a 0001 0003 0004 0005 0006 0007 ";
   "符号付きの数", {|
 var gv: i8 = -3
 fn sign(v: i8) -> u8 { if v < 0 { return '-' }  if v == 0 { return '0' }  return '+' }
