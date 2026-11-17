@@ -1,0 +1,61 @@
+# v で始まるタグ（例: v0.1.0）を push すると、3 つの OS で hlc をビルドして、
+# GitHub のリリースに zip / tar.gz を付けて公開する。
+#   git tag v0.1.0 && git push origin v0.1.0
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, name: windows }
+          - { os: macos-latest, name: macos-arm64 }
+          - { os: ubuntu-latest, name: linux-x86_64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.2"
+      - run: opam install dune --yes
+      - run: opam exec -- dune build
+      - name: まとめる
+        shell: bash
+        run: |
+          mkdir -p dist/hlang
+          cp _build/default/bin/hlc.exe dist/hlang/hlc${{ matrix.name == 'windows' && '.exe' || '' }}
+          cp -r lib examples README.md dist/hlang/
+          chmod +x dist/hlang/hlc*
+          rm -f dist/hlang/examples/*.rom dist/hlang/examples/*.sms
+      - name: zip（Windows）
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/hlang -DestinationPath hlang-${{ github.ref_name }}-windows.zip
+      - name: tar.gz（macOS・Linux）
+        if: matrix.name != 'windows'
+        run: tar -C dist -czf hlang-${{ github.ref_name }}-${{ matrix.name }}.tar.gz hlang
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.name }}
+          path: hlang-*
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pkg-*
+          merge-multiple: true
+      - name: リリースを作る
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" hlang-* --repo "$GITHUB_REPOSITORY" \
+            --title "hlang $TAG" --generate-notes \
+            --notes "hlc（hlang のコンパイラ）の実行ファイルです。展開したフォルダのまま使います（hlc と lib/ を並べておく）。Windows は PowerShell で .\\hlc.exe examples\\game.hl 、macOS・Linux は ./hlc examples/game.hl 。"
