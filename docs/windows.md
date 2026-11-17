@@ -33,6 +33,10 @@ CI は `ocaml/setup-ocaml` で OCaml 5.2 を入れて、`opam install dune` し�
 
 `ocaml -version` が 5.x、`dune --version` が 3.0 以上であることを確かめます。
 
+## 1.5 自分でビルドしない（GitHub Actions の成果物を使う）
+
+GitHub の「Actions」タブで、最新の ci の実行を開き、下の「Artifacts」から `hlang-windows-latest` を取ります。`hlc.exe`、`lib/`、`examples/` が入っています。展開して、そのフォルダで `.\hlc.exe examples\hello.hl --run` を実行します。`hlc.exe` は `lib/` を隣から探すので、フォルダの中身は動かさないでください。
+
 ## 2. ビルドと実行
 
 ```powershell
