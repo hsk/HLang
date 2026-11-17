@@ -90,6 +90,8 @@ dune test                                          # 全テスト
 
 小さなループ 4 つの比較では、SDCC 4.6（`--opt-code-speed`）の 159 バイト・71,360 T に対して、hlang は 107 バイト・49,297 T です（[bench/run.sh](bench/run.sh)）。8 命令のバイトコードマシンは、`stack[sp]` と素直に書いても 142,386 T で、手書きアセンブリの 146,348 T より速く動きます（[bench/vm.sh](bench/vm.sh)）。比較の量はまだ少なく、最適とは主張しません。
 
+ゲーム 1 本の比較には、作例 [hsk/damaxian_hl](https://github.com/hsk/damaxian_hl) があります。CoBinee さんの DAMAXIAN（MSX）を、C 版から hlang に移したもので、元のアセンブラ版・C（SDCC）版と同じ動きで比べられます。v0.2.0 では、タイマ割り込みの処理 1 回が平均 43,787 T です（1/60 秒は 59,659 T）。
+
 ## 検証
 
 - エミュレータは zexdoc・zexall の全 67 項目が通ります。アセンブラは全 697 命令で `z80asm` と一致します。
