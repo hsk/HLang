@@ -97,8 +97,45 @@ let dead keep code =
   go false code
 
 (* 1 回の置き換えが次の置き換えを可能にすることがあるので、2 回かける *)
+(* 命令が読むレジスタ。分からない命令や、飛ぶ・呼ぶ・戻る命令は None（その先で何が読まれるか分からない） *)
+let reads (op, args) =
+  let rec regs = function R r -> halves r | M x -> regs x | X (r, _) -> [ r ] | I _ -> [] in
+  let all l = List.concat_map regs l in
+  match op, args with
+  | "ld", R _ :: rest -> Some (all rest)
+  | "ld", d :: rest -> Some (regs d @ all rest)
+  | ("inc" | "dec"), _ -> Some (all args)
+  | ("add" | "adc" | "sbc"), _ -> Some (all args)
+  | ("sub" | "and" | "or" | "xor" | "cp"), _ -> Some ("a" :: all args)
+  | ("rl" | "rr" | "rlc" | "rrc" | "sla" | "sra" | "srl" | "bit" | "res" | "set" | "out"), _ -> Some (all args)
+  | "in", R _ :: rest -> Some (all rest)
+  | "push", [ R "af" ] -> Some [ "a" ]
+  | "push", _ -> Some (all args)
+  | "pop", _ -> Some []
+  | ("cpl" | "neg" | "daa" | "rlca" | "rrca" | "rla" | "rra"), _ -> Some [ "a" ]
+  | ("di" | "ei" | "nop" | "scf" | "ccf"), _ -> Some []
+  | _ -> None
+
+(* 読まれる前に上書きされる 8bit レジスタへの ld を消す。ラベル、飛ぶ・呼ぶ・戻る命令に当たったら、
+   生きているとみなす。ld はフラグを変えないので、消しても困らない。 *)
+let dead_ld code =
+  let rec live r = function
+    | (Rem _, _) :: rest -> live r rest
+    | (Ins i, _) :: rest ->
+      (match reads i with
+       | None -> true
+       | Some rd -> List.mem r rd || ((not (List.mem r (writes i))) && live r rest))
+    | _ -> true
+  in
+  let rec go = function
+    | (Ins ("ld", [ R r; _ ]), _) :: rest when List.mem r all8 && not (live r rest) -> go rest
+    | x :: rest -> x :: go rest
+    | [] -> []
+  in
+  go code
+
 let tidy keep code =
-  let once code = dead keep (rewrite (thread code)) in
+  let once code = dead keep (rewrite (thread (dead_ld code))) in
   Cost.short (once (once code))
 
 (* ---- 関数 1 つの割り当て ---- *)

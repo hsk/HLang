@@ -802,6 +802,7 @@ let rec term c (t : L.t) =
          | U16 ->
            let wl, wh = match loc c U16 v with
              | Imm e -> I (Lo e), I (Hi e)
+             | Reg ("de" | "bc") when c.chl = Some v && not viahl -> R "l", R "h"   (* HL にも同じ値がある *)
              | Reg (("de" | "bc") as r) -> R (lo r), R (hi r)
              | Reg "hl" when not viahl -> R "l", R "h"
              | _ -> raise (Stuck "16bit のフィールドへは DE か BC か定数から書く")
