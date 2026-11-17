@@ -525,6 +525,27 @@ fn main() {
   puth(sum())
   for i in 0..6 { puth(es[i].b) }
 }|}, "0525 052a 0001 0003 0004 0005 0006 0007 ";
+  "16bit の計算を 8bit に狭める", {|
+struct P { a: u8, w: u16, v: u16 }
+var p: P
+var w: u16
+fn hi(q: *P) -> u8 { return (q.w >> 8) as u8 }
+fn both(q: *P) -> u16 { var t = q.v  return (t >> 8) + t }     // 上位と全体の両方を使う
+fn main() {
+  var b: u8 = 0xe5
+  w = 0x12f7
+  p.a = 0x9c  p.w = 0xabcd  p.v = 0x1234
+  var h: u16 = w
+  puth((w + 0x1f0) & 0xf0)                   // 桁上がりは上位へだけ響く
+  puth(((h + b) & 0xff) >> 3)
+  h = p.a
+  puth(((h + 0x20) & 0xc0) >> 3)
+  puth((h & 8) >> 1)
+  puth(((h << 1) | 1) & 0x7f)
+  puth((h - 0xa0) & 0xfe)
+  puth(hi(&p))
+  puth(both(&p))
+}|}, "00e0 001b 0010 0004 0039 00fc 00ab 1246 ";
   "符号付きの数", {|
 var gv: i8 = -3
 fn sign(v: i8) -> u8 { if v < 0 { return '-' }  if v == 0 { return '0' }  return '+' }
