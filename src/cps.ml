@@ -280,7 +280,7 @@ let fn (f : A.ty A.fn) : fn =
   let env = List.map2 (fun (x, _) (p, t) -> x, (V p, t)) src ps in
   { name = f.name; ps; ret = (if f.ret = A.Unit then None else Some (ty_of f.ret));
     body = block None env f.body (fun _ -> Ret None); task = f.task;
-    self = (if f.pool > 0 then Some (fst (List.hd ps)) else None) }
+    self = (if f.pool > 0 then Some (fst (List.hd ps)) else None); inline = f.inline }
 
 let convert (p : Check.prog) : fn list =
   count := 0;

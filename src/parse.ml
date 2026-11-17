@@ -250,14 +250,15 @@ let parse ?base src =
       in
       StructDef (name, fs (), ln)
     end
-    else if peek () = Id "fn" || peek () = Id "lut" then begin
+    else if peek () = Id "fn" || peek () = Id "lut" || peek () = Id "inline" then begin
+      let inline = kw "inline" in
       let lut = kw "lut" in
       if not (kw "fn") then fail "fn";
       let name = ident () in
       expect "(";
       let ps = params () in
       let ret = if eat "->" then ty () else Unit in
-      Fn ({ name; ps; ret; body = block (); lut; task = false; pool = 0; self = "" }, ln)
+      Fn ({ name; ps; ret; body = block (); lut; inline; task = false; pool = 0; self = "" }, ln)
     end
     else if kw "task" then begin               (* task 名前() { ... } / task 名前(x: u8) pool 8 { ... } *)
       let name = ident () in
@@ -265,7 +266,7 @@ let parse ?base src =
       let ps = params () in
       let pool = if kw "pool" then (match next () with Int n when n > 0 -> n | _ -> decr i; fail "個数") else 0 in
       if ps <> [] && pool = 0 then err ln "引数を取れるのは pool を付けたタスクだけ";
-      Fn ({ name; ps; ret = Unit; body = block (); lut = false; task = true; pool; self = "" }, ln)
+      Fn ({ name; ps; ret = Unit; body = block (); lut = false; inline = false; task = true; pool; self = "" }, ln)
     end
     else if kw "import" then (match next () with Str s -> Import (s, ln) | _ -> decr i; fail "ファイル名")
     else fail "fn, task, var, const, data, enum, struct, extern, import のどれか"

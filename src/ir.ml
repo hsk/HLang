@@ -46,6 +46,7 @@ type fn = {
   body : term;
   task : bool;
   self : string option;          (* プールのタスク: いまの個体のフレームを指す変数。入口と再開のたびに HL で届く *)
+  inline : bool;                 (* inline fn と書いてあれば、呼ぶ所に展開する *)
 }
 
 (* ---- 読める形にする ---- *)

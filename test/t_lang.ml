@@ -557,6 +557,25 @@ fn main() {
   for i in 0..5 { if ss[i].a == 1 { continue }  ss[i].c = 7 }                       // continue あり
   for i in 0..5 { putc('0' + ss[i].c) }
 }|}, "0120006 70777";
+  "インライン展開", {|
+var arr: [u8; 8]
+inline fn find(v: u8) -> u8 {             // ループと途中の return
+  for i in 0..8 { if arr[i] == v { return i } }
+  return 0xff
+}
+inline fn bump(i: u8) { arr[i] += 1  if arr[i] > 9 { arr[i] = 0  return }  putc('+') }
+inline fn twice(v: u8) -> u8 { return find(v) + find(v) }      // 展開した関数から、さらに展開
+fn tiny(a: u8) -> u8 { return a + 1 }     // 小さいので自動で展開
+fn main() {
+  for i in 0..8 { arr[i] = i * 2 }
+  puth(find(6))  puth(find(7))
+  for i in 0..3 { bump(i) }
+  arr[2] = 9  bump(2)
+  find(4)                                 // 戻り値を捨てる
+  puth(twice(10))
+  puth(tiny(tiny(5)))
+  for i in 0..8 { putc('0' + arr[i]) }
+}|}, "0003 00ff +++000a 0007 13068:<>";
   "符号付きの数", {|
 var gv: i8 = -3
 fn sign(v: i8) -> u8 { if v < 0 { return '-' }  if v == 0 { return '0' }  return '+' }
