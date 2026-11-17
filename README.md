@@ -53,7 +53,7 @@ fn main() {
 | 型 | `u8` `u16` `i8` `i16` `bool`、列挙型、構造体（`*名前` で番地として扱う）、表と配列 |
 | 文 | `if` `while` `loop` `for i in a..b` `match` `break` `continue` `return` |
 | タスク | `task` `yield` `wait` `spawn` `resume` `running` `stop`、`pool n`、`for e in タスク` |
-| 速度のため | `lut fn`（コンパイル時に表にする関数）、`next(p)`（読んで進める）、`copy` `outs`（`ldir` `otir`） |
+| 速度のため | `lut fn`（コンパイル時に表にする関数）、`next(p)`（読んで進める）、`copy` `outs`（`ldir` `otir`）。1 バイトずつのコピー、塗りつぶし、ポートへの読み書きのループは、自動で `ldir` `lddr` `otir` `inir` などにする（[docs/05-codegen.md](docs/05-codegen.md)） |
 | 機種とのつなぎ | `extern fn`（BIOS の呼び出し）、`port[n]`、`&関数名`、`ei` `di` `halt`、`import` |
 
 言語の詳しい説明は [docs/03-language.md](docs/03-language.md)、タスクは [docs/07-tasks.md](docs/07-tasks.md) にあります。

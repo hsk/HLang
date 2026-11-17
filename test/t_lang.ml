@@ -24,19 +24,25 @@ let collector () =
   in
   b, ext
 
+(* ポートの読み書き: 読むたびに変わる値を返し、書いた値は出力に残す（インタプリタと機械語で同じ列になるはず） *)
+let ports b =
+  let n = ref 0 in
+  (fun p -> incr n; ((p land 0xff) + (!n * 7)) land 0xff),
+  (fun p v -> Printf.bprintf b "[%x:%x]" (p land 0xff) v)
+
 type outcome = Out of string | Skip of string | Fail of string
 
 let by_interp (r : result) =
   let b, ext = collector () in
-  let w = { Interp.mem = Bytes.make 0x10000 '\000'; ext; inp = (fun _ -> 0xff);
-            out = (fun _ _ -> ()); fuel = 200_000 } in
+  let inp, out = ports b in
+  let w = { Interp.mem = Bytes.make 0x10000 '\000'; ext; inp; out; fuel = 200_000 } in
   match Interp.run r.prog w with
   | () -> Out (Buffer.contents b)
   | exception Interp.Out_of_fuel -> Skip "長すぎる"
 
 let by_emu (r : result) =
   let b, ext = collector () in
-  match run r ~ext with
+  match run r ~ext ~io:(ports b) with
   | _ -> Out (Buffer.contents b)
   | exception Run.Timeout -> Fail "エミュレータが止まらない"
 
@@ -459,6 +465,51 @@ fn main() {
   copy(buf + 4, src + n, n - 1)
   for i in 0..7 { putc(buf[i]) }
 }|}, "AAAAEFG";
+  "ブロック転送のループ", {|
+var a: [u8; 16]
+var b: [u8; 16]
+fn fwd(p: u16, n: u8) { for i in 0..n { mem[p + 1 + i] = mem[p + i] } }           // 上へ（前から）
+fn rev(p: u16, n: u8) { var i: u8 = n  while i != 0 { i -= 1  mem[p + 1 + i] = mem[p + i] } }   // 下へ（後ろから）
+fn fill(p: u16, n: u8, v: u8) { for i in 0..n { mem[p + i] = v } }
+fn fillrev(p: u16, n: u8, v: u8) { var i: u8 = n  while i != 0 { i -= 1  mem[p + i] = v } }
+fn fwdc(p: u16) { for i in 0..5 { mem[p + 1 + i] = mem[p + i] } }
+fn revc(p: u16) { var i: u8 = 6  while i != 0 { i -= 1  mem[p + 1 + i] = mem[p + i] } }
+fn revk(p: u16, n: u8) -> u8 { var i: u8 = n  while i != 0 { i -= 1  mem[p + 1 + i] = mem[p + i] }  return i }
+fn show(p: u16, n: u8) { for i in 0..n { putc('0' + mem[p + i]) }  putc('|') }
+fn reset() { for i in 0..8 { a[i] = i } }
+fn main() {
+  reset()  show(&a, 8)
+  rev(&a, 7)  show(&a, 8)                  // 右へ 1 つずらす。後ろから写すので壊れない
+  fwd(&a, 4)  show(&a, 8)                  // 前から写すので、先頭の値が広がる
+  fill(&a, 6, 9)  show(&a, 8)
+  fill(&a, 0, 1)  show(&a, 8)              // 0 個は何もしない
+  fill(&a + 2, 3, 2)  show(&a, 8)
+  fillrev(&a, 4, 5)  show(&a, 8)
+  reset()  revc(&a)  show(&a, 8)           // 回数が定数
+  reset()  fwdc(&a)  show(&a, 8)
+  reset()  putc('0' + revk(&a, 3))  show(&a, 8)   // 抜けた後の変数は 0
+  fwd(&a, 0)  rev(&a, 0)  show(&a, 8)      // 0 個は何もしない
+  for i in 0..8 { b[i] = a[i] }            // 別の配列へ
+  for i in 0..8 { a[i] = 0 }
+  show(&b, 8)  show(&a, 8)
+}|}, "01234567|00123456|00000456|99999956|99999956|99222956|55552956|00123457|00000067|000124567|00124567|00124567|00000000|";
+  "ポートへ書く・読むループ", {|
+var buf: [u8; 8]
+fn sendup(p: u16, n: u8) { for i in 0..n { port[0x98] = mem[p + i] } }                    // otir
+fn senddown(p: u16, n: u8) { var i: u8 = n  while i != 0 { i -= 1  port[0x98] = mem[p + i] } }   // otdr
+fn recvup(p: u16, n: u8) { for i in 0..n { mem[p + i] = port[0x99] } }                    // inir
+fn recvdown(p: u16, n: u8) { var i: u8 = n  while i != 0 { i -= 1  mem[p + i] = port[0x99] } }  // indr
+fn send5(p: u16) { for i in 0..5 { port[0x98] = mem[p + i] } }
+fn recv4d(p: u16) { var i: u8 = 4  while i != 0 { i -= 1  mem[p + i] = port[0x99] } }
+fn show() { for i in 0..8 { puth(buf[i]) } }
+fn main() {
+  for i in 0..8 { buf[i] = i + 1 }
+  sendup(&buf, 4)  senddown(&buf, 3)  sendup(&buf, 0)
+  recvup(&buf, 3)  recvdown(&buf + 4, 3)
+  show()
+  send5(&buf)  recv4d(&buf)
+  show()
+}|}, "[98:1][98:2][98:3][98:4][98:3][98:2][98:1]00a0 00a7 00ae 0004 00c3 00bc 00b5 0008 [98:a0][98:a7][98:ae][98:4][98:c3]00df 00d8 00d1 00ca 00c3 00bc 00b5 0008 ";
   "符号付きの数", {|
 var gv: i8 = -3
 fn sign(v: i8) -> u8 { if v < 0 { return '-' }  if v == 0 { return '0' }  return '+' }

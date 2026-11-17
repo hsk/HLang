@@ -193,7 +193,7 @@ let enc v pc (op, args) =
   let code = function "ix" -> 0xdd | _ -> 0xfd in
   let sub = function
     | R (("ix" | "iy") as r) -> set (code r); R "hl"
-    | M (R (("ix" | "iy") as r)) -> set (code r); M (R "hl")
+    | M (R (("ix" | "iy") as r)) -> set (code r); (if op <> "jp" then d := Some 0); M (R "hl")
     | M (X (r, e)) -> set (code r); d := Some (v e land 0xff); M (R "hl")
     | a -> a
   in
@@ -214,6 +214,12 @@ let bare = [ "ei"; "di"; "halt" ]      (* 言語から関数のように呼べ�
 (* 引数をレジスタで受ける組み込み: 名前, (引数のレジスタ, 壊すレジスタ, 命令)。結果があれば A に返る *)
 let prims = [
   "copy", ([ "de"; "hl"; "bc" ], [ "b"; "c"; "d"; "e"; "h"; "l" ], ("ldir", []));   (* copy(dst, src, n): メモリを写す *)
+  ".ldir", ([ "de"; "hl"; "bc" ], [ "b"; "c"; "d"; "e"; "h"; "l" ], ("ldir", []));  (* ブロック転送の最適化（Blk）が使う。ユーザーは書けない名前 *)
+  ".lddr", ([ "de"; "hl"; "bc" ], [ "b"; "c"; "d"; "e"; "h"; "l" ], ("lddr", []));
+  ".otir", ([ "c"; "hl"; "b" ], [ "b"; "h"; "l" ], ("otir", []));                  (* Blk が使う: ポートへ書くループ（前から、後ろから） *)
+  ".otdr", ([ "c"; "hl"; "b" ], [ "b"; "h"; "l" ], ("otdr", []));
+  ".inir", ([ "c"; "hl"; "b" ], [ "b"; "h"; "l" ], ("inir", []));                  (* ポートから読むループ *)
+  ".indr", ([ "c"; "hl"; "b" ], [ "b"; "h"; "l" ], ("indr", []));
   "outs", ([ "c"; "hl"; "b" ], [ "b"; "h"; "l" ], ("otir", []));                  (* outs(port, src, n): n バイトを続けてポートへ *)
   "out", ([ "c"; "a" ], [], ("out", [ M (R "c"); R "a" ]));                       (* out(port, v): 変数で選ぶポートへ書く *)
   "inp", ([ "c" ], [ "a" ], ("in", [ R "a"; M (R "c") ]));                        (* inp(port): 変数で選ぶポートを読む *)
@@ -224,7 +230,7 @@ let halves = function
   | "de" -> [ "d"; "e" ]
   | "hl" -> [ "h"; "l" ]
   | "af" -> [ "a" ]
-  | "ix" -> [ "ix" ]                     (* 半分ずつには使わない *)
+  | ("ix" | "iy") as r -> [ r ]                     (* 半分ずつには使わない *)
   | r -> if List.mem r all8 then [ r ] else []
 
 let writes (op, args) =

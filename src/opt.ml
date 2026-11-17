@@ -81,7 +81,29 @@ let rec go sub pure loads t =
      | _ -> reuse pure (fun p -> go sub (p :: pure) loads k))
   | Store (ty, a, v, k) ->
     (* 他の番地の中身は分からなくなるが、書いた番地の中身は分かっている *)
-    Store (ty, at a, at v, go sub pure [ (ty, canon (at a)), at v ] k)
+    let a = at a in
+    (* 同じ変数 + 定数で、重ならない欄の中身は、そのまま残る *)
+    let field = function
+      | V x ->
+        let x = match canon (V x) with V y -> y | _ -> x in
+        (match List.find_opt (fun (_, y) -> y = x) pure with
+         | Some ((_, Bin (o, V p, C n)), _) -> Some (p, if o = "+" then n else -n)
+         | _ -> Some (x, 0))
+      | _ -> None
+    in
+    let size = function U8 -> 1 | U16 -> 2 in
+    let kept =
+      match field a with
+      | Some (p, n) ->
+        List.filter
+          (fun ((ty', a'), _) ->
+            match field a' with
+            | Some (p', m) -> p' = p && (m + size ty' <= n || n + size ty <= m)
+            | None -> false)
+          loads
+      | None -> []
+    in
+    Store (ty, a, at v, go sub pure (((ty, canon a), at v) :: kept) k)
   | Out (p, v, k) -> Out (p, at v, go sub pure [] k)
   | Call (r, f, args, k) -> Call (r, f, List.map (fun (a, t) -> at a, t) args, go sub pure [] k)
   | LetK (ks, b) ->

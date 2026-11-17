@@ -87,8 +87,9 @@ let trial c f =
   r
 
 let a = R "a" and hl = R "hl"
-let hi r = if r = "ix" then raise (Stuck "IX は半分ずつ使わない") else String.sub r 0 1
-let lo r = if r = "ix" then raise (Stuck "IX は半分ずつ使わない") else String.sub r 1 1
+let is_x r = r = "ix" || r = "iy"
+let hi r = if is_x r then raise (Stuck "IX/IY は半分ずつ使わない") else String.sub r 0 1
+let lo r = if is_x r then raise (Stuck "IX/IY は半分ずつ使わない") else String.sub r 1 1
 let is_mem h = h.[0] = '@'
 let addr h = Sym (String.sub h 1 (String.length h - 1))
 let places h = if is_mem h then [ h ] else halves h   (* 置き場所が占める場所 *)
@@ -176,7 +177,7 @@ let rec mv c t ?(avoid = []) dst src =
     let r = scratch c avoid [ "a" ] in
     mv c t (Reg r) src;
     mv c t dst (Reg r)
-  | U16, Reg d, Reg s when d = "ix" || s = "ix" -> emit c "push" [ R s ]; emit c "pop" [ R d ]
+  | U16, Reg d, Reg s when is_x d || is_x s -> emit c "push" [ R s ]; emit c "pop" [ R d ]
   | U16, Reg d, Reg s -> emit c "ld" [ R (hi d); R (hi s) ]; emit c "ld" [ R (lo d); R (lo s) ]
   | U16, Reg d, Imm e -> emit c "ld" [ R d; I e ]
   | U16, Reg d, Slot s -> emit c "ld" [ R d; M (I (addr s)) ]
@@ -607,18 +608,18 @@ let disp o = function
   | C n -> let n = (if o = "+" then n else -n) land 0xffff in Some (if n > 0x7fff then n - 0x10000 else n)
   | _ -> None
 
-let fieldable c p = c.home p = "hl" || c.home p = "ix"
+let fieldable c p = c.home p = "hl" || is_x (c.home p)
 
 (* p + n を指すオペランド。p が HL なら HL をそこまで進めて (hl)、IX なら (ix+n)。 *)
 let field c p n =
   match c.home p with
   | "hl" when abs (n - c.ofs) <= 4 -> walk c n; M hl
-  | "ix" when n >= -128 && n < 127 -> M (X ("ix", Num n))
+  | ("ix" | "iy") as x when n >= -128 && n < 127 -> M (X (x, Num n))
   | _ -> raise (Stuck "フィールドを直接は指せない")
 
 (* 続く 1 バイト（16bit の上位） *)
 let field2 c p n =
-  if c.home p = "ix" then M (X ("ix", Num (n + 1)))
+  if is_x (c.home p) then M (X (c.home p, Num (n + 1)))
   else (push c "inc" [ hl ]; c.ofs <- c.ofs + 1; M hl)
 
 (* タスクの「続きの番地」を書く。None は「終わった」。
@@ -633,7 +634,7 @@ let set_pc c l =
   | Some s, l ->
     set_live c (SS.singleton s);
     if not (fieldable c s) then to_hl c (V s);
-    let at n = if c.home s = "ix" then M (X ("ix", Num n)) else (walk c n; M hl) in
+    let at n = if is_x (c.home s) then M (X (c.home s, Num n)) else (walk c n; M hl) in
     (match l with
      | Some l ->
        let m = at (-1) in emit c "ld" [ m; I (Hi (Sym l)) ];
@@ -827,6 +828,21 @@ let rec term c (t : L.t) =
         emit c "ld" [ M hl; src ];
         term c k)
       (fun () -> exp c m U16 e t.lv (SS.remove m inner.lv); term c inner)
+  | L.Let (m, U16, (Sh (">>", V v, 8) as e), ({ n = L.Let (x, U8, Trunc (V m'), k); _ } as inner))
+    when m' = m && (not (SS.mem m k.lv)) ->
+    (* (v >> 8) as u8 は、v の上位バイトを読むだけ *)
+    attempt c
+      (fun () ->
+        let after = SS.remove x k.lv in
+        set_live c (SS.union t.lv after);
+        let src = loc c U16 (V v) in
+        set_live c after;
+        (match src with
+         | Reg r -> mv c U8 (loc c U8 (V x)) (Reg (hi r))
+         | Slot s -> emit c "ld" [ a; M (I (Add (addr s, Num 1))) ]; st c U8 x
+         | Imm _ -> raise (Stuck "定数"));
+        term c k)
+      (fun () -> exp c m U16 e t.lv (SS.remove m inner.lv); term c inner)
   | L.Let (x, ty, e, k) ->
     (* 次の行で返すか、関数に渡して終わりの値なら、置き場所へ書くのは無駄 *)
     let brief =
@@ -916,8 +932,28 @@ let rec term c (t : L.t) =
     if tail then raw c "jp" [ target ]               (* 末尾呼び出し: 戻り番地を積まずに飛ぶ *)
     else begin
     set_live c after;
-    guard c clob;                                     (* 呼び出しをまたいで生きる値を壊されないこと *)
+    (* 壊されるレジスタに生きた値があれば、呼ぶ前に push し、戻ったら pop する（メモリへ退避するより安い）。
+       戻り値が入る A（HL）の組は、pop で壊れるので使えない。 *)
+    let pair h =
+      match h with
+      | "a" -> Some "af" | "b" | "c" | "bc" -> Some "bc" | "d" | "e" | "de" -> Some "de"
+      | "h" | "l" | "hl" -> Some "hl" | "ix" | "iy" -> Some h | _ -> None
+    in
+    let ret_pair = match r with Some (x, t) when SS.mem x k.lv -> Some (if t = U8 then "af" else "hl") | _ -> None in
+    let saves =
+      SS.fold
+        (fun x l ->
+          let h = c.home x in
+          match pair h with
+          | Some q when List.exists (fun y -> List.mem y clob) (halves h) && not (List.mem q l) -> q :: l
+          | _ -> l)
+        after []
+    in
+    if List.exists (fun q -> Some q = ret_pair) saves then raise (Stuck "戻り値の組に生きた値がある");
+    guard c (List.filter (fun y -> not (List.exists (fun q -> List.mem y (if q = "af" then [ "a" ] else halves q)) saves)) clob);
+    List.iter (fun q -> raw c "push" [ R q ]) saves;
     (match prim with Some (_, _, (op, args)) -> raw c op args | None -> raw c "call" [ target ]);
+    List.iter (fun q -> raw c "pop" [ R q ]) (List.rev saves);
     reset c;
     (match r with Some (x, t) when SS.mem x k.lv -> st c t x | _ -> ());
     term c k

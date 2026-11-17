@@ -184,7 +184,7 @@ let solve ~opt ~info ~exts (f : Ir.fn) body vars =
                 end)
               ((if t = U8 then regs8
                 else if Option.map (Hashtbl.find cls) f.self = Some x then [ "hl"; "ix"; "de"; "bc" ]
-                else regs16)
+                else regs16 @ [ "ix"; "iy" ])
                @ [ "" ]);
             Hashtbl.replace chome x !pick
           end)
@@ -255,6 +255,9 @@ let divmod =
     ".div16", [ "hl"; "de" ], [ "a"; "b"; "c"; "h"; "l" ], [
       Label ".div16"; ins "call" [ to_ ".mod16" ]; ins "ld" [ r "h"; a ]; ins "ld" [ r "l"; r "c" ]; ins "ret" [] ];
     (* 符号付き: 絶対値どうしで割ってから符号を付ける。商の符号は 2 つの符号の xor、余りの符号は割られる数と同じ *)
+    ".fill", [ "hl"; "a"; "bc" ], all8, [                       (* HL から BC バイトを A で埋める（BC は 1 以上） *)
+      Label ".fill"; ins "ld" [ M hl; a ]; ins "dec" [ r "bc" ]; ins "ld" [ a; r "b" ]; ins "or" [ r "c" ]; ins "ret" [ r "z" ];
+      ins "ld" [ r "d"; r "h" ]; ins "ld" [ r "e"; r "l" ]; ins "inc" [ de ]; ins "ldir" []; ins "ret" [] ];
     ".sdiv8", [ "a"; "e" ], [ "a"; "b"; "c"; "d"; "e" ], [
       Label ".sdiv8"; ins "ld" [ r "d"; a ]; ins "xor" [ r "e" ]; ins "ld" [ r "c"; a ]; ins "ld" [ a; r "d" ];
       ins "call" [ to_ ".abs8" ]; ins "call" [ to_ ".mod8" ]; ins "ld" [ a; r "d" ];
@@ -366,7 +369,7 @@ let program ~opt (tg : target) (p : Check.prog) (fns : Ir.fn list) : line list =
       Hashtbl.replace seen f.name ();
       if f.task then begin
         (* resume は何を壊すか分からない。本体より先に登録しておく（本体から自分を spawn できる） *)
-        let all = { Gen.phome = []; clob = "ix" :: all8 } in
+        let all = { Gen.phome = []; clob = "ix" :: "iy" :: all8 } in
         List.iter (fun s -> Hashtbl.replace info (f.name ^ s) all) [ ""; ".resume"; ".spawn"; ".live" ];
         match List.find_opt (fun (t, _, _) -> t = f.name) p.pools with
         | Some (t, n, size) ->

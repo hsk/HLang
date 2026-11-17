@@ -64,8 +64,8 @@ type result = {
 }
 
 (* エミュレータで走らせる。extern 関数は ext が肩代わりする（参照インタプリタと同じ形）。 *)
-let run ?limit r ~ext =
-  Run.exec ?limit ~org:r.org ~start:(List.assoc "start" r.syms) r.bin (Run.traps r.prog.exts ext)
+let run ?limit ?io r ~ext =
+  Run.exec ?limit ?io ~org:r.org ~start:(List.assoc "start" r.syms) r.bin (Run.traps r.prog.exts ext)
 
 (* import をたどって、1 つの構文木にする。read はファイル名から中身を返す。同じファイルは 1 回だけ読む。
    行番号はファイルごとに 100000 ずつずらしてあり、where でファイル名と行に戻せる。 *)
@@ -97,7 +97,7 @@ let compile ?(target = msx) ?(opt = true) ?read src =
     | _, Some (_, t, vs) -> Some (List.length vs * w t)
     | None, None -> None
   in
-  let ir = if opt then List.map (fun f -> Opt.fn (Ptr.fn size (Opt.fn f))) ir else ir in
+  let ir = if opt then List.map (fun f -> Opt.fn (Ptr.fn size (Blk.fn (Opt.fn f)))) ir else ir in
   let asm = Alloc.program ~opt target prog ir in
   let bin, syms =
     try Asm.assemble ~org:target.org asm with Asm.Error m -> raise (Ast.Error (0, m))

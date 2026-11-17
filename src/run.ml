@@ -4,8 +4,9 @@
 exception Timeout
 
 (* traps: (番地, 処理)。処理のあと RET したことにする。HALT で止まる。 *)
-let exec ?(limit = 100_000_000) ~org ~start bin traps =
+let exec ?(limit = 100_000_000) ?io ~org ~start bin traps =
   let s = Z80.make () in
+  Option.iter (fun (inp, out) -> s.inp <- inp; s.out <- out) io;
   Z80.load s org bin;
   s.pc <- start;
   s.sp <- 0xf000;
