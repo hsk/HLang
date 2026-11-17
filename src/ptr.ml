@@ -99,21 +99,79 @@ let fn (size : string -> int option) (f : fn) : fn =
       | 0 -> Atom (V x)
       | d -> Bin ((if d < 0 then "-" else "+"), V x, C (abs d))
     in
-    let rec go = function
+    (* ポインタの向き: 持ち歩く番地を、いちばんよく読み書きする位置に合わせてずらす。
+       スタックなら sp は「次に積む場所」だが、読み書きが多いのは一番上の sp - 1 なので、stack + sp - 1 を持ち歩く。
+       仲間ごとに、読み書きのずれを数えて、真ん中の値（ずらす量の合計が最小になる）を選ぶ。 *)
+    let uses = Hashtbl.create 16 and idx = Hashtbl.create 16 in
+    let rec count = function
+      | Let (m, U16, Idx (_, V v), k) when conv v -> Hashtbl.replace idx m (find v, snd (base v)); count k
+      | Let (_, _, Load (V m), k) | Store (_, V m, _, k) when Hashtbl.mem idx m ->
+        let r, d = Hashtbl.find idx m in
+        Hashtbl.replace uses r (d :: Option.value ~default:[] (Hashtbl.find_opt uses r));
+        count k
+      | Let (_, _, _, k) | Store (_, _, _, k) | Out (_, _, k) | Call (_, _, _, k) | Yield k -> count k
+      | LetK (ks, b) -> List.iter (fun (k : kont) -> count k.body) ks; count b
+      | If (_, _, _, _, x, y) -> count x; count y
+      | Jump _ | Switch _ | Ret _ -> ()
+    in
+    count f.body;
+    let bias x =
+      match Hashtbl.find_opt uses (find x) with
+      | Some ds -> List.nth (List.sort compare ds) ((List.length ds - 1) / 2)
+      | None -> 0
+    in
+    (* 番地を動かす順番を、読み書きに合わせて入れ替える。どちらも「ちょうど指している番地」で読み書きするため。
+       - 先に動かす: stack[sp] = x  sp += 1 は、番地を進めてから、進めた先へ書く（inc de / ld (de),a）。
+       - 後で動かす: sp -= 1 の後で前の位置を読むなら、動かす前に読んでおく（ld a,(de) / dec de）。 *)
+    let early = Hashtbl.create 8 in             (* 先に動かして、定義を済ませた変数 *)
+    let carried x = conv x && Hashtbl.mem passed x && not (Hashtbl.mem early x) in
+    (* この先（読み書きと計算だけが並ぶ間）で、b + d ちょうどへ動く変数 *)
+    let rec ahead b d = function
+      | Let (x, U8, Bin (o, V u, C c), _) when carried x && base u = (b, d - signed o c) -> Some x
+      | Let (_, _, _, k) | Store (_, _, _, k) -> ahead b d k
+      | _ -> None
+    in
+    (* x へ動く前の位置 b から読む方が近い読みを、抜き出す。戻り値は (抜き出した読み, 残り) *)
+    let rec before x near idx = function
+      | Let (m, U16, (Idx (_, V v) as e), k) when conv v && fst (base v) = x ->
+        let l, k = before x near ((m, snd (base v) - bias v) :: idx) k in
+        l, Let (m, U16, e, k)
+      | Let (y, t, Load (V m), k) when (match List.assoc_opt m idx with Some d -> abs (near d) < abs d | None -> false) ->
+        let l, k = before x near idx k in
+        (y, t, near (List.assoc m idx)) :: l, k
+      | Let (y, t, e, k) -> let l, k = before x near idx k in l, Let (y, t, e, k)
+      | k -> [], k
+    in
+    (* 読み書き 1 つ。この先でちょうどその番地へ動く変数があれば、先に動かして、それで指す *)
+    let rec access m k node =
+      let b, d = Hashtbl.find addr m in
+      match (if d = 0 then None else ahead b d k) with
+      | Some x ->
+        Hashtbl.replace early x ();
+        Hashtbl.replace addr m (x, 0);
+        Let (x, U16, at b d, node (V x) (go k))
+      | None -> let m' = fresh () in Let (m', U16, at b d, node (V m') (go k))
+    and go = function
+      | Let (x, U8, Bin (_, V _, C _), k) when Hashtbl.mem early x -> go k
+      | Let (x, U8, Bin (o, V u, C c), k) when carried x ->
+        let b, d = base u in
+        let s = signed o c in
+        let loads, k = before x (fun dx -> d + s + dx) [] k in
+        List.fold_right
+          (fun (y, t, off) rest -> let m = fresh () in Let (m, U16, at b off, Let (y, t, Load (V m), rest)))
+          loads
+          (Let (x, U16, at b (d + s), go k))
       | Let (x, U8, Bin (o, V u, C c), k) when conv x ->
         let b, d = base u in
         Let (x, U16, at b (d + signed o c), go k)
       | Let (m, U16, Idx (_, V v), k) when conv v ->
         let b, d = base v in
+        let d = d - bias v in                   (* 持ち歩いている番地から、読み書きする番地までのずれ *)
         Hashtbl.replace addr m (b, d);
         Let (m, U16, at b d, go k)
       (* 番地は読み書きのたびに計算し直す。直前にあれば、コード生成が読み書きと 1 つにまとめられる *)
-      | Let (x, t, Load (V m), k) when Hashtbl.mem addr m ->
-        let b, d = Hashtbl.find addr m and m' = fresh () in
-        Let (m', U16, at b d, Let (x, t, Load (V m'), go k))
-      | Store (t, V m, v, k) when Hashtbl.mem addr m ->
-        let b, d = Hashtbl.find addr m and m' = fresh () in
-        Let (m', U16, at b d, Store (t, V m', v, go k))
+      | Let (x, t, Load (V m), k) when Hashtbl.mem addr m -> access m k (fun a k -> Let (x, t, Load a, k))
+      | Store (t, V m, v, k) when Hashtbl.mem addr m -> access m k (fun a k -> Store (t, a, v, k))
       | Let (x, t, e, k) -> Let (x, t, e, go k)
       | Store (t, a, v, k) -> Store (t, a, v, go k)
       | Out (p, v, k) -> Out (p, v, go k)
@@ -125,7 +183,7 @@ let fn (size : string -> int option) (f : fn) : fn =
               go b)
       | Jump (k, args) ->
         (* 定数の添字を渡していた所は、表の番地 + 定数を渡す *)
-        Jump (k, List.map2 (fun (p, _) a -> match a with C c when conv p -> S (Hashtbl.find target p, c) | a -> a)
+        Jump (k, List.map2 (fun (p, _) a -> match a with C c when conv p -> S (Hashtbl.find target p, c + bias p) | a -> a)
                    (Hashtbl.find konts k) args)
       | If (o, t, a, b, x, y) -> If (o, t, a, b, go x, go y)
       | (Switch _ | Ret _) as t -> t

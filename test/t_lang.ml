@@ -402,6 +402,19 @@ fn main() {
   for i in 0..10 { ring[r] = i  r += 1  if r == 4 { r = 0 } }
   puth(ring[0]) puth(ring[1]) puth(ring[3]) puth(r)
 }|}, "0016 0001 0004 0001 000b 000a 000c 000b 000d 000c 0008 0009 0007 0002 ";
+  "ポインタの向きと、動かす順番", {|
+var st: [u8; 16]
+fn main() {
+  var sp: u8 = 0
+  for i in 0..5 { st[sp] = i * 3  sp += 1 }            // 積む: 進めてから書く形になる
+  st[sp] = st[sp - 1]  sp += 1                          // 一番上を複製
+  sp -= 1  st[sp - 1] = st[sp - 1] - st[sp]             // 引く: 戻す前に読む形になる
+  st[sp] = 7  st[sp + 1] = 8  sp += 2                   // 2 つ積む
+  while sp != 0 { sp -= 1  puth(st[sp]) }
+  var k: u8 = 8
+  for i in 0..4 { k -= 2  st[k] = i  st[k + 1] = i + 10 }   // 下へ伸びる
+  for i in 0..8 { puth(st[i]) }
+}|}, "0008 0007 0000 0009 0006 0003 0000 0003 000d 0002 000c 0001 000b 0000 000a ";
   "個体を外から見る・止める", {|
 task zako(id: u8, x: u8, hp: u8) pool 4 {
   loop { x += 1  if hp == 0 { putc('x')  return }  yield }
@@ -788,6 +801,44 @@ let make_task seed =
   p "  puth(g) puth(g8) puth(running(unit) as u8) puth(running(solo) as u8)\n}\n";
   Buffer.contents b
 
+(* 乱数で作るスタック操作。添字 sp は st を引くことと足し引きにしか使わないので、番地に直される（Ptr）。
+   向きの選び直しと、動かす順番の入れ替えを通る。深さは作るときに数えて、表の外へ出ないようにする。 *)
+let make_stack seed =
+  let st = Random.State.make [| seed |] in
+  let int n = Random.State.int st n in
+  let pick l = List.nth l (int (List.length l)) in
+  let b = Buffer.create 512 in
+  let p fmt = Printf.bprintf b fmt in
+  let e () = pick [ string_of_int (int 256); "acc"; "acc + 1"; "st[sp - 1]" ] in
+  let ops ind depth n =
+    let d = ref depth in
+    for _ = 1 to n do
+      match int 9 with
+      | 0 | 1 when !d < 10 -> p "%sst[sp] = %s  sp += 1\n" ind (if !d > 0 then e () else string_of_int (int 256)); incr d
+      | 2 when !d < 9 -> p "%sst[sp] = %d  st[sp + 1] = acc  sp += 2\n" ind (int 256); d := !d + 2
+      | 3 when !d > 0 -> p "%ssp -= 1  acc += st[sp]\n" ind; decr d
+      | 4 when !d >= 2 -> p "%ssp -= 1  st[sp - 1] = st[sp - 1] %s st[sp]\n" ind (pick [ "+"; "-"; "^" ]); decr d
+      | 5 when !d >= 1 && !d < 10 -> p "%sst[sp] = st[sp - 1]  sp += 1\n" ind; incr d
+      | 6 when !d >= 2 -> p "%sacc2 = st[sp - 1]  st[sp - 1] = st[sp - 2]  st[sp - 2] = acc2\n" ind
+      | 7 when !d >= 2 -> p "%sst[sp - 2] ^= %d  acc += st[sp - 1]\n" ind (int 256)
+      | 8 when !d >= 2 -> p "%ssp -= 2  puth(st[sp] + st[sp + 1])\n" ind; d := !d - 2
+      | _ -> p "%sacc += %d\n" ind (int 7)
+    done;
+    !d
+  in
+  p "var st: [u8; 16]\nfn main() {\n  var sp: u8 = 0\n  var acc: u8 = %d\n  var acc2: u8 = 0\n" (int 256);
+  let d = ops "  " 0 (4 + int 6) in
+  p "  for i in 0..%d {\n" (2 + int 3);
+  let d' = ops "    " d (3 + int 5) in
+  (* ループの中は、深さを元に戻して終わる *)
+  for _ = d' + 1 to d do p "    st[sp] = acc  sp += 1\n" done;
+  for _ = d + 1 to d' do p "    sp -= 1  acc ^= st[sp]\n" done;
+  p "  }\n";
+  let d = ops "  " d (int 5) in
+  for _ = 1 to d do p "  sp -= 1  puth(st[sp])\n" done;
+  p "  puth(acc)\n}\n";
+  Buffer.contents b
+
 let () =
   let fails = ref 0 in
   List.iter
@@ -830,6 +881,11 @@ let () =
     | Fail m -> incr fails; Printf.printf "NG match %d: %s\n%s\n" seed m (make_match seed)
   done;
   Gen.only := None;
+  for seed = 1 to 80 do
+    match both (make_stack seed) with
+    | Out _ | Skip _ -> ()
+    | Fail m -> incr fails; if !fails <= 3 then Printf.printf "NG スタック %d: %s\n%s\n" seed m (make_stack seed)
+  done;
   let tasks_ok = ref 0 in
   for seed = 1 to 60 do
     match both (make_task seed) with
