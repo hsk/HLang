@@ -49,7 +49,7 @@ type ctx = {
   bodies : (string, L.t * float) Hashtbl.t;            (* 継続 -> (本体, そこの重み) *)
   mutable wsel : float option;                         (* 複製の中: 分岐の出し方は、元の場所の重みで選ぶ *)
   mutable dup : bool;                                  (* 継続の本体を、飛ぶ代わりに複製している最中 *)
-  mutable tabs : ((int * string) list * string option * string) list;   (* 出した飛び先の表。複製どうしで共有する *)
+  mutable tabs : ((int * string) list * string option * bool * string) list;   (* 出した飛び先の表（分岐の値、既定の飛び先、2 ページ版か、表の名前）。複製どうしで共有する *)
   mutable next : (line * float) list Lazy.t;           (* いま出している項のすぐ後ろに並ぶコード（近い分だけ） *)
   mutable last : string option;                        (* 計算してすぐ返すか渡すだけの変数。置き場所へは書かず、A か HL から使う *)
   mutable held : (string * ty) option;                 (* 置き場所へ書かずに、A か HL にだけ持っている変数 *)
@@ -649,7 +649,7 @@ let enter c =
 
 (* ---- 値での分岐（match）。出し方は 3 通りあり、term が全部出してみて安いものを選ぶ ---- *)
 
-let only : string option ref = ref None      (* 計測用: 出し方を "lin" "bin" "tab" のどれかに絞る *)
+let only : string option ref = ref None      (* 計測用: 出し方を "lin" "bin" "tab" "tab2" のどれかに絞る *)
 
 (* 比べて分ける。値は A にあり、lo..hi のどれかだと分かっている。
    枝が leaf 個以下なら順に比べ、多ければ真ん中の値で 2 つに割る。leaf が大きければ全部を順に比べる。
@@ -683,29 +683,38 @@ let rec tree c v other ~leaf ~dec unit cs lo hi off =
     tree c v other ~leaf ~dec unit low lo (m - 1) 0
 
 (* 表で飛ぶ。256 バイト境界に置いた表の前半に飛び先の下位、128 バイト先に上位を並べる。
-   値をそのまま L に入れれば下位が、bit7 を立てれば上位が読める。 *)
-let table c other cs =
+   値をそのまま L に入れれば下位が、bit7 を立てれば上位が読める。
+   2 ページ版（v2）は下位と上位を別ページに並べ、上位は inc h で読む。set 7,l の 8 T が
+   inc h の 4 T になり、飛ぶまで 41 T が 37 T になる。代わりに表は 2 ページ分になり、
+   値の上限も 127 から 255 に届く。2 つ目の Align 256 は、すでに境界上にあるので
+   アセンブラは何も出さないが、値段の計算では表の大きさとして数えられる。 *)
+let table ~v2 c other cs =
   let top = List.fold_left (fun m (n, _) -> max m n) 0 cs in
-  if top >= 128 then raise (Stuck "値が大きくて表にできない");
+  if top >= (if v2 then 256 else 128) then raise (Stuck "値が大きくて表にできない");
   (match other with
-   | Some d -> emit c "cp" [ I (Num (top + 1)) ]; raw c "jp" [ R "nc"; klabel c d ]
-   | None -> ());
+   | Some d when not (v2 && top = 255) ->
+     (* 値が 255 まで全部表に入っているときは、範囲の確認は要らない *)
+     emit c "cp" [ I (Num (top + 1)) ]; raw c "jp" [ R "nc"; klabel c d ]
+   | _ -> ());
   let tbl =
-    match List.find_opt (fun (cs', other', _) -> cs' = cs && other' = other) c.tabs with
-    | Some (_, _, tbl) -> tbl                         (* 同じ分岐の複製なら、表は 1 つでよい *)
+    match List.find_opt (fun (cs', other', v2', _) -> cs' = cs && other' = other && v2' = v2) c.tabs with
+    | Some (_, _, _, tbl) -> tbl                      (* 同じ分岐の複製なら、表は 1 つでよい *)
     | None ->
       let tbl = fresh c "table" in
       let fill = match other with Some d -> d | None -> snd (List.hd cs) in
       let entry i = Sym (c.f ^ "." ^ match List.assoc_opt i cs with Some k -> k | None -> fill) in
       let column f = Db (List.init (top + 1) (fun i -> f (entry i))) in
-      c.data <- c.data @ [ Align 256; Label tbl; column (fun e -> Lo e); Ds (127 - top); column (fun e -> Hi e) ];
-      c.tabs <- (cs, other, tbl) :: c.tabs;
+      c.data <- c.data @ (if v2 then
+        [ Align 256; Label tbl; column (fun e -> Lo e); Ds (255 - top); Align 256; column (fun e -> Hi e) ]
+      else
+        [ Align 256; Label tbl; column (fun e -> Lo e); Ds (127 - top); column (fun e -> Hi e) ]);
+      c.tabs <- (cs, other, v2, tbl) :: c.tabs;
       tbl
   in
   emit c "ld" [ R "l"; a ];
   emit c "ld" [ R "h"; I (Hi (Sym tbl)) ];
   emit c "ld" [ a; M hl ];
-  emit c "set" [ I (Num 7); R "l" ];
+  if v2 then emit c "inc" [ R "h" ] else emit c "set" [ I (Num 7); R "l" ];
   emit c "ld" [ R "h"; M hl ];
   emit c "ld" [ R "l"; a ];
   raw c "jp" [ M hl ]
@@ -934,11 +943,12 @@ let rec term c (t : L.t) =
       if c.pick then attempt c (go true) (go false) else go false ()
     in
     let sorted = List.sort Stdlib.compare cases in
-    (* 出し方の候補。順に比べる（書いた順）、2 分探索（葉の大きさを変えて）、表。 *)
+    (* 出し方の候補。順に比べる（書いた順）、2 分探索（葉の大きさを変えて）、表（1 ページ版と 2 ページ版）。 *)
     let ways =
       ("lin", tree ~leaf:max_int cases)
       :: List.filter_map (fun leaf -> if leaf < n then Some ("bin", tree ~leaf sorted) else None) [ 1; 2; 3; 4 ]
-      @ [ "tab", (fun () -> table c other sorted) ]
+      @ [ "tab", (fun () -> table ~v2:false c other sorted);
+          "tab2", (fun () -> table ~v2:true c other sorted) ]
     in
     let ways =
       match !only with
