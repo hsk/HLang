@@ -29,7 +29,7 @@ jobs:
         run: |
           mkdir -p dist/hlang
           cp _build/default/bin/hlc.exe dist/hlang/hlc${{ matrix.name == 'windows' && '.exe' || '' }}
-          cp -r lib examples README.md dist/hlang/
+          cp -r lib examples README.md LICENSE dist/hlang/
           chmod +x dist/hlang/hlc*
           rm -f dist/hlang/examples/*.rom dist/hlang/examples/*.sms
       - name: zip（Windows）

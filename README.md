@@ -104,3 +104,7 @@ dune test                                          # 全テスト
 - [docs/09-zma.md](docs/09-zma.md)：ZMA（HRA! さんのアセンブラ）の書き方を読む・書く
 - [plan.md](plan.md)：計画と進み具合、残っていること
 - [concept.md](concept.md)：構想と、先行する実装の調査記録
+
+## ライセンス
+
+MIT ライセンスです（[LICENSE](LICENSE)）。コンパイラ、`lib/` のライブラリ、`examples/`、文書のすべてが対象です。hlang で作った ROM には、`lib/` から取り込んだコードが入りますが、MIT なので、ROM を配るときに特別な手続きは要りません（著作権の表示は LICENSE のとおり）。
