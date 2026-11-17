@@ -60,7 +60,7 @@ fn main() {
 
 ## 使い方
 
-OCaml 5 以上と dune が要ります。Windows では WSL2 の中で動かします（[docs/wsl.md](docs/wsl.md)）。
+OCaml 5 以上と dune が要ります。Windows では、WSL2 の中（[docs/wsl.md](docs/wsl.md)）でも、ネイティブの PowerShell（[docs/windows.md](docs/windows.md)）でも動かせます。
 
 ```sh
 dune build
@@ -100,5 +100,6 @@ dune test                                          # 全テスト
 
 - [docs/making.md](docs/making.md)：コンパイラの作り方（章立ての入口）
 - [docs/wsl.md](docs/wsl.md)：Windows（WSL）で使う
+- [docs/windows.md](docs/windows.md)：Windows のネイティブ（PowerShell）で使う
 - [plan.md](plan.md)：計画と進み具合、残っていること
 - [concept.md](concept.md)：構想と、先行する実装の調査記録

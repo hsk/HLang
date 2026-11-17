@@ -1,0 +1,25 @@
+# Linux、macOS、Windows（ネイティブ）の 3 つでビルドとテストを回す。
+# Windows のネイティブビルドが通るかは、ここで確かめる。
+name: ci
+on: [push, pull_request]
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.2"
+      - run: opam install dune --yes
+      - run: opam exec -- dune build
+      - run: opam exec -- dune test
+        env:
+          HL_RANDOM: "30"
+      - name: ROM を作る（MSX と SMS）
+        run: |
+          opam exec -- dune exec bin/hlc.exe -- examples/game.hl
+          opam exec -- dune exec bin/hlc.exe -- examples/sms_game.hl -sms

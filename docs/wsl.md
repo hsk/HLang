@@ -1,6 +1,6 @@
 # Windows（WSL）で使う
 
-hlang のコンパイラは OCaml だけで書かれていて、OS の機能を呼んでいません。シェルスクリプトも POSIX の `sh` です。そのため Windows では WSL2（Ubuntu）の中で、Linux と同じ手順で動かします。Windows のネイティブ（PowerShell や cmd）は対象にしません。
+hlang のコンパイラは OCaml だけで書かれていて、OS の機能を呼んでいません。シェルスクリプトも POSIX の `sh` です。そのため Windows では WSL2（Ubuntu）の中で、Linux と同じ手順で動かします。Windows のネイティブ（PowerShell）で使う場合は [windows.md](windows.md) です。
 
 > この手順は macOS で作った構成から書いたもので、WSL 上ではまだ通して確かめていません。確かめた結果は、末尾の「確認欄」に書き込んでください。
 

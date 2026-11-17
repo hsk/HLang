@@ -30,7 +30,7 @@ let () =
   let lines = List.rev !lines in
   Printf.printf "asm: 往復 %d 命令\n" (List.length lines);
   (* 外部の z80asm との突き合わせ。入っていなければ飛ばす。 *)
-  if Sys.command "which z80asm > /dev/null 2>&1" = 0 then begin
+  if (not Sys.win32) && Sys.command ("which z80asm > " ^ Filename.null ^ " 2>&1") = 0 then begin
     let src = Filename.temp_file "hl" ".asm" and out = Filename.temp_file "hl" ".bin" in
     let bad = ref 0 in
     List.iter
@@ -38,7 +38,7 @@ let () =
         let oc = open_out src in
         output_string oc (Asm.show line ^ "\n");
         close_out oc;
-        let ok = Sys.command (Printf.sprintf "z80asm -o %s %s 2> /dev/null" out src) = 0 in
+        let ok = Sys.command (Printf.sprintf "z80asm -o %s %s 2> %s" (Filename.quote out) (Filename.quote src) Filename.null) = 0 in
         let got =
           if not ok then ""
           else begin
