@@ -33,6 +33,10 @@ CI は `ocaml/setup-ocaml` で OCaml 5.2 を入れて、`opam install dune` し�
 
 `ocaml -version` が 5.x、`dune --version` が 3.0 以上であることを確かめます。
 
+## 1.4 自分でビルドしない（リリースを使う）
+
+いちばん簡単なのは、[Releases](https://github.com/hsk/HLang/releases) の `hlang-vX.Y.Z-windows.zip` を使うことです。OCaml も WSL も要りません。展開して PowerShell で `.\hlc.exe examples\game.hl` と打つまでの手順、文字化けの直し方、PATH と `HLANG_LIB` の設定は、[README の「Windows（PowerShell）」](../README.md#windowspowershell)にあります。
+
 ## 1.5 自分でビルドしない（GitHub Actions の成果物を使う）
 
 GitHub の「Actions」タブで、最新の ci の実行を開き、下の「Artifacts」から `hlang-windows-latest` を取ります。`hlc.exe`、`lib/`、`examples/` が入っています。展開して、そのフォルダで `.\hlc.exe examples\game.hl` を実行します。`examples\game.rom` ができます。`hlc.exe` は `lib/` を隣から探すので、フォルダの中身は動かさないでください。

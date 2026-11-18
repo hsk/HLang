@@ -4,15 +4,19 @@
 #   make clean         ROM を消す
 #   make tracks MACHINE=Panasonic_FS-A1   機種を変える（既定は BIOS の要らない C-BIOS_MSX1）
 
-HLC = ../_build/default/bin/hlc.exe
+# ソースから作るときは dune でビルドした物、リリースの中（src/ がない）では隣の hlc を使う
+SRC := $(wildcard ../src)
+HLC = $(if $(SRC),../_build/default/bin/hlc.exe,../hlc)
 MACHINE = C-BIOS_MSX1
 
 .PHONY: all clean sms
 all: $(patsubst %.hl,%.rom,$(filter-out sms_%,$(wildcard *.hl))) sms_game.sms
 
 # コンパイラは、ソースが変わったときだけ作り直す
+ifneq ($(SRC),)
 $(HLC): $(wildcard ../src/*.ml ../bin/*.ml ../emu/*.ml)
 	cd .. && dune build bin/hlc.exe
+endif
 
 %.rom: %.hl $(HLC) ../lib/msx.hl
 	$(HLC) $<
