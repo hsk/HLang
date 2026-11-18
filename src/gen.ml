@@ -486,6 +486,11 @@ let rec exp c x t e (before : SS.t) (after : SS.t) =
       end else times n (fun () -> emit c "sra" [ h ]; emit c "rr" [ l ])
     end
     else if n >= 16 then emit c "ld" [ hl; I (Num 0) ]
+    else if o = "<<" && n = 7 then begin
+      (* 7 回の add hl,hl（77T）の代わりに、8 ずらして 1 戻す（35T）。h の最下位は桁上げで運ぶ *)
+      emit c "rr" [ h ]; emit c "ld" [ h; l ]; emit c "rr" [ h ];
+      emit c "ld" [ l; I (Num 0) ]; emit c "rr" [ l ]
+    end
     else if o = "<<" then begin
       if n >= 8 then (emit c "ld" [ h; l ]; emit c "ld" [ l; I (Num 0) ]);
       times (n land 7) (fun () -> emit c "add" [ hl; hl ])
@@ -924,6 +929,11 @@ let rec term c (t : L.t) =
        raw c "inc" [ R r ];
        emit c "ld" [ a; R "h" ]; emit c "ld" [ M (R r); a ];
        raw c "dec" [ R r ]
+     | Reg (("ix" | "iy") as r), (Imm _ | Reg ("hl" | "de" | "bc") as lv) ->
+       (* IX/IY が指す所へは、HL を通さずに (ix+0) と (ix+1) へ書く *)
+       let wl, wh = match lv with Imm e -> I (Lo e), I (Hi e) | Reg q -> R (lo q), R (hi q) | _ -> assert false in
+       emit c "ld" [ M (X (r, Num 0)); wl ];
+       emit c "ld" [ M (X (r, Num 1)); wh ]
      | _, lv ->
        let wl, wh = match lv with
          | Imm e -> I (Lo e), I (Hi e)
@@ -1191,10 +1201,16 @@ let rec term c (t : L.t) =
        let l = fresh c "else" in
        raw c "jp" [ R (neg_cc cc); I (Sym l) ];
        let ca, chl = c.ca, c.chl in
+       (* 枝はどちらか一方しか通らないので、半分ずつに数える。else if が続くと、奥ほど軽くなる。
+          同じ重みで数えると、枝ごとに要る push/pop が段の数だけ重く見え、ループの変数をメモリへ追いやった
+          （damaxian の EnemyUpdate） *)
+       let w = c.w in
+       c.w <- w /. 2.;
        term c yes;
        label c l;
        c.ca <- ca; c.chl <- chl; c.hnear <- None; c.zf <- None;
-       term c no)
+       term c no;
+       c.w <- w)
   | L.Ret None -> if c.task then (set_live c t.lv; raw c "jp" [ I (Sym (c.f ^ ".done")) ]) else raw c "ret" []
   | L.Yield k ->
     (* 中断: 続きの番地を覚えて、resume した側へ戻る。レジスタの中身は残らないので、

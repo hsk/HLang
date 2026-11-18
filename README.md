@@ -88,9 +88,9 @@ dune test                                          # 全テスト
 
 ## どのくらい速いか
 
-小さなループ 4 つの比較では、SDCC 4.6（`--opt-code-speed`）の 159 バイト・71,360 T に対して、hlang は 107 バイト・49,297 T です（[bench/run.sh](bench/run.sh)）。8 命令のバイトコードマシンは、`stack[sp]` と素直に書いても 142,386 T で、手書きアセンブリの 146,348 T より速く動きます（[bench/vm.sh](bench/vm.sh)）。比較の量はまだ少なく、最適とは主張しません。
+小さなループ 4 つの比較では、SDCC 4.6（`--opt-code-speed`）の 159 バイト・71,360 T に対して、hlang は 99 バイト・49,850 T です（[bench/run.sh](bench/run.sh)）。8 命令のバイトコードマシンは、`stack[sp]` と素直に書いても 137,598 T で、手書きアセンブリの 146,348 T より速く動きます（[bench/vm.sh](bench/vm.sh)）。比較の量はまだ少なく、最適とは主張しません。
 
-ゲーム 1 本の比較には、作例 [hsk/damaxian_hl](https://github.com/hsk/damaxian_hl) があります。CoBinee さんの DAMAXIAN（MSX）を、C 版から hlang に移したもので、元のアセンブラ版・C（SDCC）版と同じ動きで比べられます。今の版（main）では、タイマ割り込みの処理 1 回が平均 43,739 T で、手書きのアセンブラ版（46,190 T）より約 5% 速く、SDCC 版（69,037 T）より 3 割以上速くなりました（同じ測り方。1/60 秒は 59,659 T）。
+ゲーム 1 本の比較には、作例 [hsk/damaxian_hl](https://github.com/hsk/damaxian_hl) があります。CoBinee さんの DAMAXIAN（MSX）を、C 版から hlang に移したもので、元のアセンブラ版・C（SDCC）版と同じ動きで比べられます。今の版（main）では、タイマ割り込みの処理 1 回が平均 43,392 T で、手書きのアセンブラ版（46,190 T）より約 5% 速く、SDCC 版（69,037 T）より 3 割以上速くなりました（同じ測り方。1/60 秒は 59,659 T）。
 
 ## 検証
 
