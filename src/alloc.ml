@@ -224,8 +224,34 @@ let budget nvars = max 200 (min 1500 (150_000 / max 1 nvars))
 let regs8 = [ "a"; "b"; "c"; "d"; "e"; "h"; "l" ]
 let regs16 = [ "hl"; "de"; "bc" ]
 
-(* 割り当てを探す。戻り値は (コード, 表, 置き場所, 候補の番地)。 *)
-let solve ~opt ~info ~exts (f : Ir.fn) body vars =
+(* 呼ぶ側で引数を置き場所へ移す時間（T）の見積もり。src は呼ぶ側での値の場所（レジスタ名、"#" 定数、"@" メモリ）、
+   dst は引数の置き場所（"@" で始まればメモリ）。 *)
+let move_t src dst wide =
+  let mem h = String.length h > 0 && h.[0] = '@' in
+  let x h = h = "ix" || h = "iy" in
+  if src = dst && not (mem src) then 0
+  else if wide then
+    match src with
+    | "#" -> if mem dst then 26 else if x dst then 14 else 10
+    | "@" -> if mem dst then 32 else if dst = "hl" then 16 else 20
+    | _ when mem dst -> if src = "hl" then 16 else 20
+    | _ when x src || x dst -> 25                   (* push / pop *)
+    | _ -> 8
+  else
+    match src with
+    | "#" -> if mem dst then 20 else 7
+    | "@" -> if mem dst then 26 else if dst = "a" then 13 else 17
+    | _ when mem dst -> if src = "a" then 13 else 17
+    | _ -> 4
+
+(* 関数の値段の合計（呼び出し規約を決め直した方を採るかどうかに使う）と、1 回目の関数ごとの値段 *)
+let total = ref 0.
+let first_price : (string, int) Hashtbl.t = Hashtbl.create 64
+let first_res = Hashtbl.create 64
+
+(* 割り当てを探す。戻り値は (コード, 表, 引数の置き場所, 候補の番地, 値段)。
+   hint n h: n 番目の引数を h に置いたとき、呼ぶ側で値を移す手間（値段の単位） *)
+let solve ?(hint = fun _ _ -> 0.) ~opt ~info ~exts (f : Ir.fn) body vars =
   let cls = Hashtbl.create 64 in                       (* 変数 -> まとまりの代表 *)
   let chome = Hashtbl.create 64 in                     (* 代表 -> 置き場所。"" はメモリ *)
   List.iter (fun (x, _, _) -> Hashtbl.replace cls x x; Hashtbl.replace chome x "") vars;
@@ -239,7 +265,11 @@ let solve ~opt ~info ~exts (f : Ir.fn) body vars =
     let labels = List.concat_map (function Db es -> List.fold_left refs_e [] es | _ -> []) data in
     tidy ?fine ~wrap:(keep f ~info ~exts) (f.name :: (f.name ^ ".done") :: labels) code, data
   in
-  let price (code, data) = Cost.price code data in
+  (* 引数の置き場所には、呼ぶ側で値を移す手間を足す（2 回目だけ。hint） *)
+  let price (code, data) =
+    let moves = List.mapi (fun n (p, _) -> if Hashtbl.mem cls p then hint n (home p) else 0.) f.ps in
+    Cost.price code data + int_of_float (List.fold_left ( +. ) 0. moves)
+  in
   (* 試せる回数には上限を付ける。大きな関数で時間が膨らまないように。
      重い変数から順に試すので、上限に達しても大事な変数は済んでいる。 *)
   let left = ref (budget (List.length vars)) in
@@ -344,7 +374,8 @@ let solve ~opt ~info ~exts (f : Ir.fn) body vars =
     run (List.filter (fun (_, t, _) -> t = U8) reps @ List.filter (fun (_, t, _) -> t <> U8) reps);
     if !best >= fbest then (restore first; best := fbest)
   end;
-  let code, data = gen ~fine:opt () in
+  Gen.recording := opt;
+  let code, data = Fun.protect ~finally:(fun () -> Gen.recording := false) (fun () -> gen ~fine:opt ()) in
   (* メモリ上の置き場所の候補。実際に使われたものだけ、後で番地を割り当てる。 *)
   let slots =
     List.filter_map
@@ -353,7 +384,7 @@ let solve ~opt ~info ~exts (f : Ir.fn) body vars =
         if Gen.is_mem h && Hashtbl.find cls x = x then Some (String.sub h 1 (String.length h - 1), t) else None)
       vars
   in
-  code, data, List.map (fun (p, _) -> home p) f.ps, slots
+  code, data, List.map (fun (p, _) -> home p) f.ps, slots, Cost.price code data
 
 (* プールのタスクを動かすルーチン。n 個のフレームが size バイトおきに並ぶ。
    フレームは「続きの番地 2 バイト、変数」。番地の上位が 0 なら空き。 *)
@@ -436,8 +467,18 @@ let divmod =
       Label ".neg16"; ins "xor" [ a ]; ins "sub" [ r "l" ]; ins "ld" [ r "l"; a ]; ins "sbc" [ a; a ]; ins "sub" [ r "h" ];
       ins "ld" [ r "h"; a ]; ins "ret" [] ] ]
 
-let fn ~opt ~info ~exts (f : Ir.fn) =
-  let code, data, phome, slots = solve ~opt ~info ~exts f (L.annotate f) (L.vars f) in
+let fn ?hint ~opt ~info ~exts (f : Ir.fn) =
+  let go hint = solve ?hint ~opt ~info ~exts f (L.annotate f) (L.vars f) in
+  (* 呼ぶ側の手間を入れて決め直すのは、自分の値段が 1 回目より高くならないときだけ。値段の重みはループを
+     8 倍までしか数えないので、何千回も回るループの中の損が、1 回の呼び出しの得より小さく見えることがある
+     （bench/vm.hl の run: 引数をメモリから IX へ移すと、ループの中で push ix / pop hl が要る） *)
+  let code, data, phome, slots, pr =
+    match hint, Hashtbl.find_opt first_price f.name with
+    | Some _, Some p1 -> let (_, _, _, _, pr) as r = go hint in if pr > p1 then go None else r
+    | Some _, None -> go hint
+    | None, _ -> let (_, _, _, _, pr) as r = go None in Hashtbl.replace first_price f.name pr; r
+  in
+  total := !total +. float pr;
   (* 壊すレジスタ。clobbers(...) と書いてあれば、ほかは中でしまってあるので、書いたものだけ *)
   let clob = clobs ~info ~exts code in
   let clob = match allowed f with Some ok -> List.filter (fun r -> List.mem r ok) clob | None -> clob in
@@ -480,7 +521,7 @@ let rec uses t =
   | Ir.Switch (a, _, _) -> syms [ a ]
   | Ir.Ret r -> syms (List.map fst (Option.to_list r))
 
-let program ~opt (tg : target) (p : Check.prog) (fns : Ir.fn list) : line list =
+let program1 ?hint ~opt (tg : target) (p : Check.prog) (fns : Ir.fn list) : line list =
   let info = Hashtbl.create 16 in
   let code = ref [] and slots = ref [] and tables = ref [] in
   (* 呼ばれる側から先に決める。呼ぶ側は、相手の引数の置き場所と壊すレジスタを見て決められる。 *)
@@ -516,7 +557,21 @@ let program ~opt (tg : target) (p : Check.prog) (fns : Ir.fn list) : line list =
         | None -> tasks := f.name :: !tasks
       end;
       List.iter (fun g -> Option.iter visit (find g)) (uses f.body);
-      let c, d, i, s = fn ~opt ~info ~exts:p.exts f in
+      (* 2 回目: 1 回目に選んだ引数の置き場所が、どれも呼ぶ側の手間がいちばん小さい所で、呼ぶ相手の規約も
+         1 回目と同じなら、1 回目の結果をそのまま使う *)
+      let deps = List.map (fun g -> g, Hashtbl.find_opt info g) (uses f.body) in
+      let settled h (i1 : Gen.info) =
+        let best n ph = List.for_all (fun c -> h f.name n c >= h f.name n ph) (regs8 @ regs16 @ [ "ix"; "iy"; "@" ]) in
+        List.for_all Fun.id (List.mapi best i1.phome)
+      in
+      let c, d, i, s =
+        match hint, Hashtbl.find_opt first_res f.name with
+        | Some h, Some (deps1, ((_, _, i1, _) as r), pr) when deps1 = deps && settled h i1 -> total := !total +. float pr; r
+        | _ ->
+          let r = fn ?hint:(Option.map (fun h -> h f.name) hint) ~opt ~info ~exts:p.exts f in
+          if hint = None then Hashtbl.replace first_res f.name (deps, r, Hashtbl.find first_price f.name);
+          r
+      in
       Hashtbl.replace info f.name i;
       (* タスクは、入口と、中断から再開する場所のそれぞれから測る *)
       let starts =
@@ -640,3 +695,37 @@ let program ~opt (tg : target) (p : Check.prog) (fns : Ir.fn list) : line list =
   @ [ Label "start" ] @ clear @ init
   @ [ Ins ("call", [ I (Sym "main") ]); Ins ("di", []); Ins ("halt", []) ]
   @ !code @ strs @ datas @ !tables @ luts @ List.rev equs
+
+(* 呼び出し規約は、呼ばれる側から順に、その関数のコードだけを見て決まる。呼ぶ側で値を移す手間（HL から IX へ
+   push / pop、など）は入らない。そこで、1 回目に出したコードから、呼ぶ所ごとに各引数の値がどこにあったかを
+   集め、2 回目は、引数の置き場所の値段にその手間（呼ぶ所の重みで平均した時間）を足して、全体を決め直す。
+   関数の値段の合計が安くなった方を採る。最適化ありのときだけ。 *)
+let program ~opt tg p fns =
+  if not opt then program1 ~opt tg p fns
+  else begin
+    Gen.calls := [];
+    total := 0.;
+    Hashtbl.reset first_price;
+    Hashtbl.reset first_res;
+    let first = program1 ~opt tg p fns in
+    let rep1 = !report and ram1 = !ram and t1 = !total in
+    let sites = Hashtbl.create 64 in
+    List.iter
+      (fun (g, n, src, wide, w) ->
+        let k = (g, n) in
+        Hashtbl.replace sites k ((src, wide, w) :: Option.value ~default:[] (Hashtbl.find_opt sites k)))
+      !Gen.calls;
+    Gen.calls := [];
+    let hint g n h =
+      match Hashtbl.find_opt sites (g, n) with
+      | None -> 0.
+      | Some l ->
+        let sw = List.fold_left (fun s (_, _, w) -> s +. w) 0. l in
+        let st = List.fold_left (fun s (src, wide, w) -> s +. (w *. float (move_t src h wide))) 0. l in
+        4. *. st /. Float.max sw 1e-9
+    in
+    total := 0.;
+    let second = program1 ~hint ~opt tg p fns in
+    Gen.calls := [];
+    if !total < t1 then second else (report := rep1; ram := ram1; first)
+  end

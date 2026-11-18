@@ -18,6 +18,12 @@ exception Stuck of string           (* 理由。調べるとき用 *)
 (* 呼ぶ側が知っておくこと: 引数の置き場所と、壊されるレジスタ *)
 type info = { phome : string list; clob : string list }
 
+(* 呼び出し規約を、呼ぶ側の都合も入れて決め直すための記録（Alloc.program の 2 回目）。
+   recording の間に出したコードの、関数を呼ぶ所ごとに (呼ぶ関数, 何番目の引数, 値の元の場所, 16bit か, 重み)。
+   元の場所はレジスタ名、"#"（定数）、"@"（メモリ） *)
+let recording = ref false
+let calls : (string * int * string * bool * float) list ref = ref []
+
 type loc =
   | Reg of string
   | Slot of string               (* "@ラベル": メモリ上の置き場所 *)
@@ -957,6 +963,12 @@ let rec term c (t : L.t) =
       | Some (regs, _, addr, clob), _ -> List.map (fun (_, r) -> Reg r) regs, clob, I (Num addr)
       | None, None ->
         let i = Hashtbl.find c.info f in
+        if !recording then
+          List.iteri
+            (fun n (v, t) ->
+              let src = match loc c t v with Reg r -> r | Imm _ -> "#" | Slot _ -> "@" in
+              calls := (f, n, src, t = U16, c.w) :: !calls)
+            args;
         List.map (fun h -> if is_mem h then Slot h else Reg h) i.phome, i.clob, I (Sym f)
     in
     let tail =                                        (* 呼んだ結果をそのまま返すだけか *)
