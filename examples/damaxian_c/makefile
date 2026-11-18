@@ -95,8 +95,8 @@ all: $(TARGET).com
 run: $(TARGET).com
 	openmsx -machine Sanyo_PHC-70FD2 -diska $(OUTDIR)
 
-# build with hlcc (the hlang C front end, ../bin/hlcc.ml) into a ROM cartridge, and run it
-HLANG			=	..
+# build with hlcc (the hlang C front end, ../../bin/hlcc.ml) into a ROM cartridge, and run it
+HLANG			=	../..
 HLCC			=	$(HLANG)/_build/default/bin/hlcc.exe
 
 rom2: $(BINDIR)

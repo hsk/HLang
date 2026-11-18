@@ -7,7 +7,7 @@
 # 1/60 秒は 59659T。これを超えるとゲームが 30fps に落ちる。
 # 要る物: openMSX、python3。ROM は C-BIOS_MSX1 で動かす。
 HERE=$(cd "$(dirname "$0")" && pwd)
-ROOT=$(cd "$HERE/../.." && pwd)
+ROOT=$(cd "$HERE/../../.." && pwd)
 DIR=$(cd "${1:-$HERE/..}" && pwd)
 TMP=$(mktemp -d)
 cd "$DIR" || exit 1

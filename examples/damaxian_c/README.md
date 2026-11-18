@@ -38,7 +38,7 @@ SDCC（4.6 で確認）と openMSX が要ります。
 ```sh
 make        # disk/DAMAXIAN.BIN を作る
 make run    # ビルドして openMSX（Sanyo PHC-70FD2、ディスク起動）で動かす。タイトルで SPACE を押すと始まる
-make run2   # hlang の C フロントエンド（../bin/hlcc.ml）で bin/DAMAXIAN.rom を作り、openMSX（C-BIOS）で動かす
+make run2   # hlang の C フロントエンド（../../bin/hlcc.ml）で bin/DAMAXIAN.rom を作り、openMSX（C-BIOS）で動かす
 ```
 
 `make rom2` は ROM を作るだけです。hlcc は、ひとつ上の hlang のリポジトリで `dune build` して使います。

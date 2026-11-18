@@ -90,6 +90,8 @@ dune exec bin/hlcc.exe -- examples/hello.c --run   # C の例を走らせる
 | [game.hl](examples/game.hl) | 小さなシューティング（MSX）。敵と弾のプール、当たり判定、スプライト、割り込みの曲 |
 | [sms_game.hl](examples/sms_game.hl) | 同じゲームの SMS 版 |
 | [hello.c](examples/hello.c) | C で書いた例（hlcc） |
+| [damaxian_hl/](examples/damaxian_hl) | シューティングゲーム DAMAXIAN（MSX）の hlang 版。`make run` |
+| [damaxian_c/](examples/damaxian_c) | 同じゲームの C 版。`make run` は SDCC、`make run2` は hlcc |
 
 ライブラリは [lib/msx.hl](lib/msx.hl) と [lib/sms.hl](lib/sms.hl) です。使わなかった関数は ROM に入りません。
 
@@ -97,7 +99,7 @@ dune exec bin/hlcc.exe -- examples/hello.c --run   # C の例を走らせる
 
 小さなループ 4 つの比較では、SDCC 4.6（`--opt-code-speed`）の 159 バイト・71,360 T に対して、hlang は 99 バイト・49,850 T です（[bench/run.sh](bench/run.sh)）。8 命令のバイトコードマシンは、`stack[sp]` と素直に書いても 137,598 T で、手書きアセンブリの 146,348 T より速く動きます（[bench/vm.sh](bench/vm.sh)）。比較の量はまだ少なく、最適とは主張しません。
 
-ゲーム 1 本の比較には、作例 [hsk/damaxian_hl](https://github.com/hsk/damaxian_hl) があります。CoBinee さんの DAMAXIAN（MSX）を、C 版から hlang に移したもので、元のアセンブラ版・C（SDCC）版と同じ動きで比べられます。今の版（main）では、タイマ割り込みの処理 1 回が平均 43,251 T で、手書きのアセンブラ版（46,190 T）より約 6% 速く、SDCC 版（69,037 T）より 3 割以上速くなりました（同じ測り方。1/60 秒は 59,659 T）。
+ゲーム 1 本の比較には、作例 [examples/damaxian_hl](examples/damaxian_hl) があります。CoBinee さんの DAMAXIAN（MSX）を、C 版（[examples/damaxian_c](examples/damaxian_c)）から hlang に移したもので、元のアセンブラ版・C（SDCC）版と同じ動きで比べられます。今の版では、タイマ割り込みの処理 1 回が平均 42,871 T で、手書きのアセンブラ版（46,190 T）より約 7% 速く、SDCC 版（69,037 T）より 3 割以上速くなりました（同じ測り方。1/60 秒は 59,659 T）。C 版をそのまま hlcc でコンパイルすると 43,617 T です。
 
 ## 検証
 

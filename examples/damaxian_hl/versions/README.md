@@ -1,6 +1,6 @@
 # 保存した版
 
-コンパイラの最適化の前後を比べられるように、2 つの版を残してあります。どちらも `main.hl` からビルドでき（`HLANG_LIB=../../../lib ../../../_build/default/bin/hlc.exe main.hl`）、アセンブラ版（[CoBinee/damaxian-msx](https://github.com/CoBinee/damaxian-msx)）と同じ動きをします。
+コンパイラの最適化の前後を比べられるように、2 つの版を残してあります。どちらも `main.hl` からビルドでき（`HLANG_LIB=../../../../lib ../../../../_build/default/bin/hlc.exe main.hl`）、アセンブラ版（[CoBinee/damaxian-msx](https://github.com/CoBinee/damaxian-msx)）と同じ動きをします。
 
 | 版 | 内容 | 割り込み処理 1 回の平均 | 1/60 秒（59,659T）を超える |
 | --- | --- | --- | --- |
