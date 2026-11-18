@@ -139,6 +139,10 @@ let dead_ld ~fine code =
       when fine && not (List.exists (fun h -> live h rest) (halves r)) -> go rest
     | ((Ins ("ld", [ R x; R y ]), _) as i) :: (Ins ("ld", [ R y'; R x' ]), _) :: rest
       when fine && x = y' && y = x' && List.mem x all8 && List.mem y all8 -> go (i :: rest)
+    (* ld d,h; ld e,l; ld (nn),de は、HL から直に ld (nn),hl として、写しを後ろへ回す（要らなければ上で消える） *)
+    | ((Ins ("ld", [ R hi; R "h" ]), _) as i1) :: ((Ins ("ld", [ R lo; R "l" ]), _) as i2) :: (Ins ("ld", [ (M (I _) as m); R p ]), d) :: rest
+      when fine && List.mem p [ "de"; "bc" ] && halves p = [ hi; lo ] ->
+      go ((Ins ("ld", [ m; R "hl" ]), d) :: i1 :: i2 :: rest)
     | x :: rest -> x :: go rest
     | [] -> []
   in

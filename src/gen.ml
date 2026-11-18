@@ -539,7 +539,16 @@ let rec exp c x t e (before : SS.t) (after : SS.t) =
   | U16, Trunc _ -> assert false
 
 and exp_add c x v w go =
-  let v, w = if (match w with V y -> c.home y = "hl" | _ -> false) || c.chl = Some w then w, v else v, w in
+  (* 片方が DE/BC にあり、もう片方が定数かメモリで、作業用の組が空いていないなら、そちらを HL へ読む。
+     空いているときにも使うと、探索の値段が変わって、別の割り当て（悪いほう）に落ちた（damaxian の BulletMove）。
+     空いていないときだけなら、前は行き詰まった割り当てが通るようになるだけ（ループの回数を B に置ける） *)
+  let in_pair v = match loc c U16 v with Reg ("de" | "bc") -> c.chl <> Some v | _ -> false in
+  let v, w =
+    if (match w with V y -> c.home y = "hl" | _ -> false) || c.chl = Some w then w, v
+    else if in_pair v && (match loc c U16 w with Reg _ -> false | _ -> true)
+            && not (List.exists (free c) [ "de"; "bc" ]) then w, v
+    else v, w
+  in
   let p = if v = w then "hl" else pair_of c w in
   to_hl c v;
   go ();
