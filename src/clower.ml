@@ -282,6 +282,8 @@ let conv ln (v : v) t =
   match v.x.x with
   | A.Int n ->
     let m = if size ln t = 1 then 0xff else 0xffff in
+    (* 元が符号付きなら、符号を保ってから切る（i8 の 0x81 は i16 で 0xff81） *)
+    let n = match v.t with Int (true, 1) when n land 0x80 <> 0 -> n lor (lnot 0xff) | _ -> n in
     { x = int ln (n land m); t }
   | _ when (match v.t with Rec _ -> true | _ -> false) && is_ptr t -> { v with t }   (* SDCC は構造体をポインタへ変換すると番地にする *)
   | _ -> if hl ln (decay v.t) = hl ln t then { v with t } else { x = mk ln (A.Cast (hl ln t, v.x)); t }
