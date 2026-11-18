@@ -20,12 +20,6 @@ OBJDIR			=	objects
 # binary file directory
 BINDIR			=	bin
 
-# output file directory
-OUTDIR			=	disk
-
-# tool directory
-TOOLDIR			=	./tools
-
 # vpath search directories
 VPATH			=	$(SRCDIR):$(INCDIR):$(OBJDIR):$(BINDIR)
 
@@ -57,7 +51,8 @@ CFLAGS			=	-mz80 --opt-code-speed -I$(INCDIR) -I.
 LD				=	sdcc
 
 # linker flags
-LDFLAGS			=	-mz80 --no-std-crt0 --nostdinc --nostdlib --code-loc 0x8420 --data-loc 0xd400
+# code in the ROM cartridge (header at 0x4000, code from 0x4010), variables in RAM from 0xc000
+LDFLAGS			=	-mz80 --no-std-crt0 --nostdinc --nostdlib --code-loc 0x4010 --data-loc 0xc000
 
 
 # suffix rules
@@ -89,32 +84,32 @@ CSRCS			=	main.c System.c Sound.c Math.c \
 # object files
 OBJS			=	$(ASSRCS:.s=.rel) $(CSRCS:.c=.rel)
 
-all: $(TARGET).com
+all: $(BINDIR)/$(TARGET).rom
 
-# build and run on openMSX (press SPACE on the title screen to start)
-run: $(TARGET).com
-	openmsx -machine Sanyo_PHC-70FD2 -diska $(OUTDIR)
+# build and run on openMSX with C-BIOS (press SPACE on the title screen to start)
+run: all
+	openmsx -machine C-BIOS_MSX1 -cart $(BINDIR)/$(TARGET).rom
 
 # build with hlcc (the hlang C front end, ../../bin/hlcc.ml) into a ROM cartridge, and run it
 HLANG			=	../..
-HLCC			=	$(HLANG)/_build/default/bin/hlcc.exe
+# from source: built with dune. In a release (no src/): ../../hlcc
+SRC				:=	$(wildcard $(HLANG)/src)
+HLCC			=	$(if $(SRC),$(HLANG)/_build/default/bin/hlcc.exe,$(HLANG)/hlcc)
 
 rom2: $(BINDIR)
-	cd $(HLANG); dune build bin/hlcc.exe
+	$(if $(SRC),cd $(HLANG); dune build bin/hlcc.exe)
 	$(HLCC) $(addprefix $(SRCDIR)/,$(CSRCS))
-	mv $(SRCDIR)/main.rom $(BINDIR)/$(TARGET).rom
+	mv $(SRCDIR)/main.rom $(BINDIR)/$(TARGET)2.rom
 
 run2: rom2
-	openmsx -machine C-BIOS_MSX1 -cart $(BINDIR)/$(TARGET).rom
+	openmsx -machine C-BIOS_MSX1 -cart $(BINDIR)/$(TARGET)2.rom
 
 # build project target
 #
-$(TARGET).com: tool $(OBJDIR) $(BINDIR) $(OBJS)
+# the ROM is 0x4000-0x7fff of the ihx
+$(BINDIR)/$(TARGET).rom: $(OBJDIR) $(BINDIR) $(OBJS)
 	$(LD) $(LDFLAGS) -o $(BINDIR)/$(TARGET).ihx $(foreach file,$(OBJS),$(OBJDIR)/$(file))
-	$(TOOLDIR)/ihx2bload $(BINDIR)/$(TARGET).ihx -o $(OUTDIR)/$(TARGET).BIN
-
-tool:
-	cd tools; make
+	makebin -s 32768 -o 16384 $(BINDIR)/$(TARGET).ihx $@
 
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
@@ -123,7 +118,6 @@ $(BINDIR):
 # clean project
 #
 clean:
-	cd tools; make clean
 	rm -rf $(OBJDIR)
 	rm -rf $(BINDIR)
 ##	@del /F /Q makefile.depend
@@ -146,7 +140,7 @@ resource:
 
 # phony targets
 #
-.PHONY:				all run rom2 run2 tool clean depend
+.PHONY:				all run rom2 run2 clean depend
 
 
 # include depend file

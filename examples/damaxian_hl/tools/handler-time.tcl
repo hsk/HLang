@@ -1,5 +1,6 @@
 # 割り込み処理（H.TIMI から呼ぶ関数）の所要時間を、ゲームフレームごとに記録する openMSX のスクリプト。tools/handler-time.sh から使う
 set throttle off
+set renderer none
 set ::fc 0
 set ::armed 0
 set ::calls 0
@@ -41,6 +42,9 @@ proc setkeys {fc} {
   }
 }
 proc leave {} {
+  # 重なった割り込みが、この出口と同じ番地・同じ SP に戻ることがある（処理の ret の直前に割り込まれたとき）。
+  # その割り込みの時間を先に引く。引かないと、入れ子で走った次のフレームの分まで入ってしまう。
+  if {$::isrbp ne ""} isr_out
   set dt [expr {[machine_info time] - $::t0 - $::acc}]
   puts $::f "$::fc [expr {int($dt * 3579545)}] $::nested"
   catch {debug remove_bp $::exitbp}
@@ -55,7 +59,7 @@ proc hook {} {
   if {$::armed == 0} {
     if {$::calls == 3} { keymatrixdown 8 0x01 }
     if {$::calls == 8} { keymatrixup 8 0x01 }
-    if {[peek [expr {$::inp + 4}]] == 1} { poke $::rnd $::seed; poke $::bcnt 1; set ::armed 1; set ::prev 0; setkeys 1 }
+    if {[peek [expr {$::inp + 4}]] == 1} { poke $::rnd $::seed; poke $::bcnt 1; if {$::tcnt ne ""} { poke $::tcnt 1 }; set ::armed 1; set ::prev 0; setkeys 1 }
     return
   }
   if {[peek $::flagaddr] & 1} { incr ::nested; return }   ;# 重なって来た割り込み（処理しない）
@@ -80,14 +84,6 @@ proc hook {} {
 proc arm {} {
   set e [expr {[peek 0xfda0] | ([peek 0xfda1] << 8)}]
   debug set_bp $e {} hook
-}
-if {$::sdcc} {
-  after time 2 {
-    set fd [open $::bin rb]; fconfigure $fd -translation binary
-    seek $fd 7; set data [read $fd]; close $fd
-    debug write_block memory 0x8400 $data
-    reg PC 0x8400
-  }
 }
 debug set_bp 0x38 {} isr_in
 after time 7 arm

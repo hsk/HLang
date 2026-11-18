@@ -41,7 +41,7 @@
 ## 作り方、遊び方
 
 ```sh
-make          # main.rom（15360 バイト。16KB の ROM にぎりぎり入る）
+make          # main.rom（中身は 14,080 バイト。16KB の ROM）
 make run      # openMSX で起動（MACHINE=... で機種を変える）
 make assets   # pattern.hl と bg.hl を元の C から作り直す
 ```
@@ -50,31 +50,43 @@ make assets   # pattern.hl と bg.hl を元の C から作り直す
 
 ## 速さと大きさ（SDCC 版、アセンブラ版との比較）
 
-比べた相手は 2 つです。どちらも openMSX（C-BIOS_MSX1）に読み込んで測りました。
+比べた相手は 2 つです。どちらもこのリポジトリにあり、`make` で `bin/DAMAXIAN.rom`（16KB の ROM カートリッジ）を作ります。
 
-- **SDCC 版**: `../damaxian_c`（C）を SDCC 4.6.0 でビルド（`--opt-code-speed`。`System.c`、`Sound.c`、`Math.c` などはインラインアセンブラ入り）。
-- **アセンブラ版**: [CoBinee/damaxian-msx](https://github.com/CoBinee/damaxian-msx)（オリジナル。全部アセンブラで、サウンドも含む）。SDCC 付属の `sdasz80` と `sdld` でビルド。
+- **SDCC 版**: [../damaxian_c](../damaxian_c)（C）を SDCC 4.6.0 でビルド（`--opt-code-speed`。`System.c`、`Sound.c`、`Math.c` などはインラインアセンブラ入り）。
+- **アセンブラ版**: [../damaxian_asm](../damaxian_asm)（オリジナルの [CoBinee/damaxian-msx](https://github.com/CoBinee/damaxian-msx) の写し。全部アセンブラで、サウンドも含む）。SDCC 付属の `sdasz80` と `sdld` でビルド。
 
-物差しは、**タイマ割り込みの処理 1 回（= 1 ゲームフレーム）の所要時間**です（[tools/handler-time.sh](tools/handler-time.sh)）。左右に動いて連射する入力を 6000 フレーム入れます。1/60 秒は 59,659T で、これを超えると割り込みが重なって、ゲームが 30fps に落ちます。「CPU の待ち時間の割合」は、フレームが落ちると待ちが増えて負荷が軽く見えるので使いません。
+物差しは、**タイマ割り込みの処理 1 回（= 1 ゲームフレーム）の所要時間**です。左右に動いて連射する入力で、乱数の種を変えて 4 回（各 3000 フレーム）走らせ、まとめて数えます。処理中に重なって来た割り込みの、BIOS の処理時間は引いてあります。1/60 秒は 59,659T で、これを超えると割り込みが重なって、ゲームが 30fps に落ちます。「CPU の待ち時間の割合」は、フレームが落ちると待ちが増えて負荷が軽く見えるので使いません。
+
+```sh
+tools/handler-time.sh                        # hlang 版
+tools/handler-time.sh versions/01-straight   # hlang 版（素直に写した版）
+tools/bin-time.sh asm                        # アセンブラ版
+tools/bin-time.sh sdcc                       # SDCC 版
+tools/bin-time.sh hlcc                       # 同じ C を hlcc でビルドした版
+```
+
+どれも openMSX（C-BIOS_MSX1）で動かします。2026-11-19 に測った数字です。
 
 | | 平均 | 95% | 最大 | 1/60 秒超え |
 | --- | --- | --- | --- | --- |
-| アセンブラ版 | **45,538T** | 57,481T | 82,611T | 3.0% |
-| SDCC 版 | 69,448T | 96,145T | 184,162T | 74.2% |
-| hlang 版（調整後。[versions/02-tuned](versions/02-tuned/) と同じ） | 66,409T | 91,807T | 130,790T | 68.2% |
-| hlang 版（素直に写した版。[versions/01-straight](versions/01-straight/)） | 71,988T | 97,850T | 122,609T | 76.2% |
+| hlang 版（調整後。[versions/02-tuned](versions/02-tuned/) と同じ） | **42,871T** | 55,528T | 86,749T | 1.5% |
+| hlang 版（素直に写した版。[versions/01-straight](versions/01-straight/)） | 46,596T | 59,072T | 90,356T | 4.1% |
+| アセンブラ版 | 46,541T | 57,618T | 89,654T | 2.8% |
+| SDCC 版 | 68,570T | 91,715T | 116,305T | 73.8% |
+
+同じ C のソースを hlcc（hlang の C フロントエンド）でビルドすると、平均 43,612T です（[../damaxian_c](../damaxian_c) の README）。
 
 | | hlang 版 | SDCC 版 | アセンブラ版 |
 | --- | --- | --- | --- |
-| コード + 表 | 約 14.9KB（ROM は 15360 バイト） | 約 14.8KB | 約 13.4KB |
-| RAM | 842 バイト | 979 バイト（スタック 256 を含む） | 998 バイト（同） |
+| コード + 表 | 14,080 バイト | 14,818 バイト | 13,784 バイト |
+| RAM | 768 バイト | 981 バイト（スタック 256 を含む） | 1,000 バイト（同） |
 
-- **hlang 版は SDCC 版よりわずかに速いが、アセンブラ版には 3 割以上届かない。** C から移した版（hlang も SDCC も）は、積極的に遊ぶと、敵の撃ち返しが増える場面で 1/60 秒に収まらず、ゲームが遅くなる。アセンブラ版は収まる。
-- 書き方の調整（01 → 02）で縮んだのは約 8% で、残りはコンパイラの出すコードの質による。調べた結果と、コンパイラで直したい点は [compiler-todo.md](compiler-todo.md) にある。
+- **hlang 版（02）は、アセンブラ版より平均で 8% ほど速い。** 1/60 秒を超えるフレームも、アセンブラ版の半分ほど。調整なしの 01 でも、アセンブラ版とほぼ同じ速さ。SDCC 版は、敵の撃ち返しが増える場面で 1/60 秒に収まらず、ゲームが遅くなる。
+- 書き方の調整（01 → 02）で縮むのは約 8%。コンパイラを直してきた経緯と、残っている点は [compiler-todo.md](compiler-todo.md) にある。
 
 ## アセンブラ版との一致
 
-動きの基準は、元の手書きアセンブラ版（[CoBinee/damaxian-msx](https://github.com/CoBinee/damaxian-msx)）です。`../damaxian_c`（C 版）は、アセンブラ版を C に書き直したもので、動きが少し変わっている箇所があり、hlang 版はそこをアセンブラ版に合わせてあります。
+動きの基準は、元の手書きアセンブラ版（[../damaxian_asm](../damaxian_asm)）です。`../damaxian_c`（C 版）は、アセンブラ版を C に書き直したもので、動きが少し変わっている箇所があり、hlang 版はそこをアセンブラ版に合わせてあります。
 
 C 版（SDCC）と違う箇所（hlang 版はアセンブラ版の動き）:
 
