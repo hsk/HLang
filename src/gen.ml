@@ -477,9 +477,16 @@ let rec exp c x t e (before : SS.t) (after : SS.t) =
     in
     to_hl c v;
     go ();
+    (* 定数のバイトが 0（^ |）や 0xff（&）なら、そのバイトは変わらない。& 0 と | 0xff は定数を置くだけ *)
+    let byte s = match w with C n -> Some ((n lsr s) land 0xff) | _ -> None in
     List.iter
-      (fun (h, w) -> emit c "ld" [ a; R h ]; alu c (op8 o) w; emit c "ld" [ R h; a ])
-      [ "h", wh; "l", wl ];
+      (fun (h, w, s) ->
+        match o, byte s with
+        | ("^" | "|"), Some 0 | "&", Some 0xff -> ()
+        | "&", Some 0 -> emit c "ld" [ R h; I (Num 0) ]
+        | "|", Some 0xff -> emit c "ld" [ R h; I (Num 0xff) ]
+        | _ -> emit c "ld" [ a; R h ]; alu c (op8 o) w; emit c "ld" [ R h; a ])
+      [ "h", wh, 8; "l", wl, 0 ];
     st c U16 x
   | U16, Sh (o, v, n) ->
     to_hl c v;
@@ -525,6 +532,17 @@ let rec exp c x t e (before : SS.t) (after : SS.t) =
     emit c "ld" [ R (lo dst); src ];
     emit c "ld" [ R (hi dst); I (Num 0) ];
     if is_mem hx then st c U16 x
+  | _, Sext v ->
+    (* A に入れ、下位へ。add a,a で符号ビットをキャリーへ出し、sbc a,a で 0 か 0xff を作って上位へ *)
+    let via = is_mem hx || hx = "ix" || hx = "iy" in
+    let dst = if via then "hl" else hx in
+    to_a c v;
+    go ();
+    emit c "ld" [ R (lo dst); a ];
+    emit c "add" [ a; a ];
+    emit c "sbc" [ a; a ];
+    emit c "ld" [ R (hi dst); a ];
+    if via then st c U16 x
   | U16, Load p ->
     (match loc c U16 p, hx with
      | Reg (("ix" | "iy") as r), ("de" | "bc" | "hl") ->

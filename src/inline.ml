@@ -48,7 +48,7 @@ let copy (f : fn) args r k =
   let ex = function
     | Atom a -> Atom (at a) | Bin (o, a, b) -> Bin (o, at a, at b) | Sh (o, a, n) -> Sh (o, at a, n)
     | Mulc (a, n) -> Mulc (at a, n) | Idx (s, a) -> Idx (s, at a) | Lut (s, a) -> Lut (s, at a)
-    | Un (o, a) -> Un (o, at a) | Zext a -> Zext (at a) | Trunc a -> Trunc (at a)
+    | Un (o, a) -> Un (o, at a) | Zext a -> Zext (at a) | Sext a -> Sext (at a) | Trunc a -> Trunc (at a)
     | Cmp (o, t, a, b) -> Cmp (o, t, at a, at b) | Load a -> Load (at a) | In p -> In p
   in
   let ret = "ret" ^ sfx in

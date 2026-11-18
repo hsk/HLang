@@ -31,7 +31,7 @@ and kont = {
 let of_atoms l = List.fold_left (fun s a -> match a with V x -> SS.add x s | _ -> s) SS.empty l
 
 let atoms_of = function
-  | Atom a | Sh (_, a, _) | Mulc (a, _) | Idx (_, a) | Lut (_, a) | Un (_, a) | Zext a | Trunc a | Load a -> [ a ]
+  | Atom a | Sh (_, a, _) | Mulc (a, _) | Idx (_, a) | Lut (_, a) | Un (_, a) | Zext a | Sext a | Trunc a | Load a -> [ a ]
   | Bin (_, a, b) | Cmp (_, _, a, b) -> [ a; b ]
   | In _ -> []
 

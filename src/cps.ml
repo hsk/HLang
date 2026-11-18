@@ -52,6 +52,21 @@ let flip (ty : A.ty) t o a k =
 
 let is_cmp o = List.mem o [ "=="; "!="; "<"; "<="; ">"; ">=" ]
 
+(* 比較する。符号付き 16 ビットの値と、下位バイトが 0 の定数 n*256 の大小は、上位バイトだけで決まる
+   （x < n*256 は hi(x) < n）。x < 0 と x >= 0 は、上位バイトが 0x80 以上かどうか。
+   fin は (演算子, 型, 左, 右) から比較の項を作る *)
+let compare_s (ty : A.ty) t o a b fin =
+  let o, a, b = match o, a with (">" | "<="), C _ -> (if o = ">" then "<" else ">="), b, a | _ -> o, a, b in
+  match o, b with
+  | ("<" | ">="), C n when A.signed ty && t = U16 && n land 0xff = 0 ->
+    let x = fresh "t" and y = fresh "t" in
+    let hi = n lsr 8 land 0xff in
+    let o', b' = if hi = 0 then (if o = "<" then ">=" else "<"), C 0x80 else o, C (hi lxor 0x80) in
+    Let (x, U16, Sh (">>", a, 8), Let (y, U8, Trunc (V x),
+      if hi = 0 then fin o' U8 (V y) b'
+      else let z = fresh "t" in Let (z, U8, Bin ("^", V y, C 0x80), fin o' U8 (V z) b')))
+  | _ -> flip ty t o a (fun a -> flip ty t o b (fun b -> fin o t a b))
+
 (* 式: 値を k に渡す *)
 let rec exp (env : env) (e : A.ty A.expr) (k : atom -> term) : term =
   let t = ty_of e.a in
@@ -71,7 +86,7 @@ let rec exp (env : env) (e : A.ty A.expr) (k : atom -> term) : term =
           cond env e (fun () -> Jump (j, [ C 1 ])) (fun () -> Jump (j, [ C 0 ])))
   | Bin (o, l, r) when is_cmp o ->
     let t = ty_of l.a in
-    exp env l (fun a -> exp env r (fun b -> flip l.a t o a (fun a -> flip l.a t o b (fun b -> bind U8 (Cmp (o, t, a, b)) k))))
+    exp env l (fun a -> exp env r (fun b -> compare_s l.a t o a b (fun o t a b -> bind U8 (Cmp (o, t, a, b)) k)))
   | Bin ("+", { x = Addr s; _ }, { x = Cast (A.U16, i); _ }) when Hashtbl.mem small s && not (A.wide i.a) ->
     exp env i (fun a -> bind U16 (Idx (s, a)) k)
   | Bin ("+", { x = Addr s; _ }, { x = Bin ("<<", { x = Cast (A.U16, i); _ }, { x = Int 1; _ }); _ })
@@ -122,8 +137,7 @@ let rec exp (env : env) (e : A.ty A.expr) (k : atom -> term) : term =
       if to_ = A.Bool then bind U8 (Cmp ("!=", ty_of a.a, v, C 0)) k
       else if A.wide a.a = A.wide to_ then k v
       else if A.wide to_ && a.a = A.I8 then
-        (* 符号を保って広げる: 符号ビットを反転して広げ、0x80 を引く *)
-        bind U8 (Bin ("^", v, C 0x80)) (fun x -> bind U16 (Zext x) (fun y -> bind U16 (Bin ("-", y, C 0x80)) k))
+        bind U16 (Sext v) k                        (* 符号を保って広げる *)
       else if A.wide to_ then bind U16 (Zext v) k
       else bind U8 (Trunc v) k)
 
@@ -144,7 +158,7 @@ and cond env (e : A.ty A.expr) yes no : term =
     bind U16 (Load (S (t ^ ".pc", 0))) (fun a -> If ("!=", U16, a, S (t ^ ".done", 0), yes (), no ()))
   | Bin (o, l, r) when is_cmp o ->
     let t = ty_of l.a in
-    exp env l (fun a -> exp env r (fun b -> flip l.a t o a (fun a -> flip l.a t o b (fun b -> If (o, t, a, b, yes (), no ())))))
+    exp env l (fun a -> exp env r (fun b -> compare_s l.a t o a b (fun o t a b -> If (o, t, a, b, yes (), no ()))))
   | _ -> exp env e (fun a -> If ("!=", U8, a, C 0, yes (), no ()))
 
 let rec simple (e : A.ty A.expr) =                (* yes/no を 1 回ずつしか使わない条件か *)

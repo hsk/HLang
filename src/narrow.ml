@@ -19,7 +19,7 @@ let count = ref 0
 let fresh () = incr count; Printf.sprintf "n.%d" !count
 
 let atoms_e = function
-  | Atom p | Zext p | Trunc p | Load p | Un (_, p) | Sh (_, p, _) | Mulc (p, _) | Idx (_, p) | Lut (_, p) -> [ p ]
+  | Atom p | Zext p | Sext p | Trunc p | Load p | Un (_, p) | Sh (_, p, _) | Mulc (p, _) | Idx (_, p) | Lut (_, p) -> [ p ]
   | Bin (_, p, q) | Cmp (_, _, p, q) -> [ p; q ]
   | In _ -> []
 
@@ -70,7 +70,7 @@ let narrow body =
   let rec lo8 p =
     match p, def p with
     | C n, _ -> id, C (n land 0xff)
-    | _, Some (U16, Zext b) -> id, b
+    | _, Some (U16, (Zext b | Sext b)) -> id, b
     | _, Some (U16, Bin ((("+" | "-" | "&" | "|" | "^") as o), q, r)) ->
       let w1, a1 = lo8 q in
       let w2, a2 = lo8 r in
@@ -112,8 +112,8 @@ let narrow body =
        | U8, Trunc (V m as y) when bytewise m && (match def y with Some (U16, Load _) -> true | _ -> false) ->
          let a = match def y with Some (_, Load a) -> a | _ -> assert false in
          bind (Load a)
-       | U8, Trunc y when (match def y with Some (U16, Zext _) -> true | _ -> false) ->
-         let b = match def y with Some (_, Zext b) -> b | _ -> assert false in
+       | U8, Trunc y when (match def y with Some (U16, (Zext _ | Sext _)) -> true | _ -> false) ->
+         let b = match def y with Some (_, (Zext b | Sext b)) -> b | _ -> assert false in
          bind (Atom b)
        | _ -> bind e)
     | Store (ty, a, v, k) -> Store (ty, a, v, go k)

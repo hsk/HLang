@@ -30,7 +30,7 @@ let body i (t : term) fin =
   let bound a = match a with V x -> x = i || (match Hashtbl.find_opt env x with Some Inv | None -> false | Some _ -> true) | _ -> false in
   let inv a = not (bound a) in
   let pure = function
-    | Atom p | Zext p | Trunc p | Un (_, p) | Sh (_, p, _) | Mulc (p, _) -> inv p
+    | Atom p | Zext p | Sext p | Trunc p | Un (_, p) | Sh (_, p, _) | Mulc (p, _) -> inv p
     | Bin (_, p, q) -> inv p && inv q
     | _ -> false
   in
@@ -61,7 +61,7 @@ let body i (t : term) fin =
 let rec used x t =
   let a = function V y -> y = x | _ -> false in
   let e = function
-    | Atom p | Zext p | Trunc p | Load p | Un (_, p) | Sh (_, p, _) | Mulc (p, _) | Idx (_, p) | Lut (_, p) -> a p
+    | Atom p | Zext p | Sext p | Trunc p | Load p | Un (_, p) | Sh (_, p, _) | Mulc (p, _) | Idx (_, p) | Lut (_, p) -> a p
     | Bin (_, p, q) | Cmp (_, _, p, q) -> a p || a q
     | In _ -> false
   in

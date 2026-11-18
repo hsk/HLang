@@ -50,5 +50,14 @@ void main(void) {
     i16 m = -2;
     outh(m & 0xf0); outh(m | 0x0f);
     outh(((w + 0x20) & 0xc0) >> 3); outh((w + 0x20) >> 3); outh((w & 0xc0) >> 3);
+    /* i8 から i16 への符号拡張と、符号付きの比較（0 や n*256 と比べる所は上位バイトだけで） */
+    i16 vs[6] = { -32768, -257, -1, 0, 255, 256 };
+    for (u8 k = 0; k < 6; k++) {
+        i16 v = vs[k];
+        out(v < 0 ? '-' : '+'); out(v >= 0 ? 'p' : 'n'); out(0 > v ? 'L' : 'G');
+        out(v < 256 ? 's' : 'S'); out(v >= -256 ? 'u' : 'U'); out(-256 < v ? 'x' : 'X'); out(v < 6 ? 'q' : 'Q');
+    }
+    u8 bytes[3] = { 0x7f, 0x80, 0xff };
+    for (u8 k = 0; k < 3; k++) outh((u16)((i16)(i8)bytes[k] - (i8)0x81));
     out('\n');
 }

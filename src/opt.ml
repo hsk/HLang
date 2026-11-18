@@ -16,6 +16,7 @@ let map_exp f = function
   | Lut (s, a) -> Lut (s, f a)
   | Un (o, a) -> Un (o, f a)
   | Zext a -> Zext (f a)
+  | Sext a -> Sext (f a)
   | Trunc a -> Trunc (f a)
   | Cmp (o, t, a, b) -> Cmp (o, t, f a, f b)
   | Load a -> Load (f a)
@@ -42,6 +43,7 @@ let fold ty e =
   | Un ("-", C a) -> c (-a)
   | Un ("~", C a) -> c (lnot a)
   | Zext (C a) | Trunc (C a) -> Some (C (a land 0xff))
+  | Sext (C a) -> let a = a land 0xff in Some (C (if a >= 0x80 then a lor 0xff00 else a))
   | Cmp (o, t, C a, C b) ->
     let m = if t = U8 then 0xff else 0xffff in
     let a = a land m and b = b land m in

@@ -19,6 +19,7 @@ type exp =
   | Lut of string * atom         (* 256 バイト境界に置いた表を 8bit の添字で引く *)
   | Un of string * atom          (* - ~ *)
   | Zext of atom                 (* u8 -> u16 *)
+  | Sext of atom                 (* i8 -> u16（符号を保って広げる） *)
   | Trunc of atom                (* u16 -> u8 *)
   | Cmp of string * ty * atom * atom   (* 比較の結果を 0/1 で *)
   | Load of atom                 (* メモリを読む *)
@@ -66,6 +67,7 @@ let exp = function
   | Lut (s, a) -> Printf.sprintf "%s[%s]" s (atom a)
   | Un (o, a) -> o ^ atom a
   | Zext a -> "zext " ^ atom a
+  | Sext a -> "sext " ^ atom a
   | Trunc a -> "trunc " ^ atom a
   | Load a -> "mem[" ^ atom a ^ "]"
   | In p -> Printf.sprintf "port[%d]" p
