@@ -14,6 +14,8 @@ hlang は Z80 向けの小さなコンパイル言語です。この文書は、
 | [7. タスク](07-tasks.md) | yield、wait、spawn、resume。途中で止まって続きから動く | [src/gen.ml](../src/gen.ml), [src/interp.ml](../src/interp.ml) |
 | [8. MSX と SMS で動かす](08-msx.md) | 画面と音。import、関数の番地、割り込み、ライブラリ。セガ・マスターシステム版 | [lib/msx.hl](../lib/msx.hl), [lib/sms.hl](../lib/sms.hl), [examples/game.hl](../examples/game.hl), [examples/sms_game.hl](../examples/sms_game.hl) |
 | [9. ZMA の書き方を読む・書く](09-zma.md) | HRA! さんの ZMA 互換の読み込み、マクロ、逆アセンブル | [src/zma.ml](../src/zma.ml), [src/dis.ml](../src/dis.ml) |
+| [10. C のサブセット（実測調査）](10-c-subset.md) | SDCC で書かれたゲーム 1 本のソースを数えて、受ける C の範囲を決める | — |
+| [11. C フロントエンド（hlcc）](11-c-frontend.md) | C を、C の意味のまま hlang の構文木に直し、同じバックエンドに通す | [src/cpp.ml](../src/cpp.ml), [src/cparse.ml](../src/cparse.ml), [src/clower.ml](../src/clower.ml), [src/casm.ml](../src/casm.ml), [bin/hlcc.ml](../bin/hlcc.ml) |
 
 ## 全体の流れ
 

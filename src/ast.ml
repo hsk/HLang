@@ -76,6 +76,9 @@ type 'a top =
   | Import of string * int                     (* import "ファイル" *)
   | Extern of string * (ty * string) list * ty * 'a expr * string list option * int
     (* 引数は (型, レジスタ)。最後のリストは壊すレジスタ。書かなければ全部壊すとみなす。 *)
+  | AsmFn of string * (ty * string) list * ty * Asm.line list * int
+    (* アセンブラで書いた関数（C の __naked と __asm から）。引数は (型, レジスタ)。本体は ret で戻る。
+       呼び方は extern と同じで、番地の代わりに名前のラベルを呼ぶ。壊すレジスタは命令から求める *)
 
 exception Error of int * string                (* 行番号, 内容 *)
 

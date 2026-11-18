@@ -960,7 +960,7 @@ let rec term c (t : L.t) =
     let dsts, clob, target =
       match List.assoc_opt f c.exts, prim with
       | _, Some (regs, clob, _) -> List.map (fun r -> Reg r) regs, clob, I (Num 0)
-      | Some (regs, _, addr, clob), _ -> List.map (fun (_, r) -> Reg r) regs, clob, I (Num addr)
+      | Some (regs, _, addr, clob), _ -> List.map (fun (_, r) -> Reg r) regs, clob, (if addr < 0 then I (Sym f) else I (Num addr))
       | None, None ->
         let i = Hashtbl.find c.info f in
         if !recording then

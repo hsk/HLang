@@ -74,6 +74,12 @@ dune test                                          # 全テスト
 
 `-O0` を付けると最適化なし（変数をすべてメモリに置く）になります。コンパイルは一瞬です。
 
+C（SDCC の書き方のサブセット）も、同じバックエンドでコンパイルできます。コマンドは `hlcc` です（[docs/11-c-frontend.md](docs/11-c-frontend.md)）。`#include "msx.hl"` と書くと、hlang のライブラリの関数を C から呼べます。SDCC の書き方のインラインアセンブラ（`__asm` … `__endasm`、`__naked`）も使えます。
+
+```sh
+dune exec bin/hlcc.exe -- examples/hello.c --run   # C の例を走らせる
+```
+
 例は [examples/](examples/) にあります。`cd examples && make game` で openMSX が、`make sms` で MAME が起動します。
 
 | ファイル | 内容 |
@@ -83,6 +89,7 @@ dune test                                          # 全テスト
 | [music.hl](examples/music.hl) `tracks.hl` | 曲のバイトコードをタスクが読んで、PSG を鳴らす |
 | [game.hl](examples/game.hl) | 小さなシューティング（MSX）。敵と弾のプール、当たり判定、スプライト、割り込みの曲 |
 | [sms_game.hl](examples/sms_game.hl) | 同じゲームの SMS 版 |
+| [hello.c](examples/hello.c) | C で書いた例（hlcc） |
 
 ライブラリは [lib/msx.hl](lib/msx.hl) と [lib/sms.hl](lib/sms.hl) です。使わなかった関数は ROM に入りません。
 

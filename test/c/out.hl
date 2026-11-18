@@ -1,0 +1,2 @@
+extern fn out(c: u8 @ a) @ 0x00a2 clobbers()
+extern fn outh(v: u16 @ hl) @ 0x0008

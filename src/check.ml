@@ -18,8 +18,29 @@ type prog = {
   fns : ty fn list;
   pools : (string * int * int) list;                       (* プールのタスク: 名前, 個数, フレームのバイト数 *)
   exts : (string * ((ty * string) list * ty * int * string list)) list;
-    (* 名前, (引数, 戻り, 番地, 壊すレジスタ) *)
+    (* 名前, (引数, 戻り, 番地, 壊すレジスタ)。番地が -1 なら、asms にある関数（名前のラベルを呼ぶ） *)
+  asms : (string * Asm.line list) list;                    (* アセンブラで書いた関数の本体 *)
 }
+
+(* アセンブラの関数が壊すレジスタ: 命令が書くもの（add ix,de のように、最初のオペランドのレジスタも数える）。
+   中のラベル以外へ飛ぶ・呼ぶ命令があれば、全部 *)
+let asm_clob lines =
+  let local = List.filter_map (function Asm.Label l -> Some l | _ -> None) lines in
+  let all = Asm.all8 @ [ "ix"; "iy" ] in
+  let regs r = match Asm.halves r with [] -> if r = "ix" || r = "iy" then [ r ] else [] | l -> l in
+  List.sort_uniq compare
+    (List.concat_map
+       (function
+         | Asm.Ins ((("jp" | "jr" | "djnz") as op), args) ->
+           (match List.rev args with
+            | Asm.I (Asm.Sym l) :: _ when List.mem l local -> if op = "djnz" then [ "b" ] else []
+            | _ -> all)                                    (* 外へ飛ぶ、jp (hl) など *)
+         | Asm.Ins (("call" | "rst"), _) -> all
+         | Asm.Ins (("ret" | "reti" | "retn" | "push" | "cp" | "bit" | "out"), _) -> []
+         | Asm.Ins ((_, args) as i) -> List.concat_map regs (Asm.writes i) @ (match args with Asm.R r :: _ -> regs r | _ -> [])
+         | _ -> [])
+       lines)
+
 
 type env = {
   consts : (string, int) Hashtbl.t;
@@ -559,7 +580,7 @@ let check (tops : int top list) : prog =
       Hashtbl.replace env.sigs f (List.map (fun r -> if String.length r = 2 then U16 else U8) regs, if f = "inp" then U8 else Unit))
     Asm.prims;
   (* 1 回目: 名前と型を集める。関数は定義より前で呼べる。 *)
-  let globals = ref [] and exts = ref [] and arrays = ref [] and datas = ref [] in
+  let globals = ref [] and exts = ref [] and arrays = ref [] and datas = ref [] and asms = ref [] in
   List.iter
     (function
       | Const (x, e) -> define e.a x; Hashtbl.replace env.consts x (const e.a e)
@@ -668,7 +689,12 @@ let check (tops : int top list) : prog =
               rs
             @ (match ret with Unit -> [] | U16 | I16 | Ptr _ -> [ "h"; "l" ] | _ -> [ "a" ])
         in
-        exts := (name, (ps, ret, const ln addr, clob)) :: !exts)
+        exts := (name, (ps, ret, const ln addr, clob)) :: !exts
+      | AsmFn (name, ps, ret, lines, ln) ->
+        define ln name;
+        Hashtbl.replace env.sigs name (List.map fst ps, ret);
+        exts := (name, (ps, ret, -1, asm_clob lines)) :: !exts;
+        asms := (name, lines) :: !asms)
     tops;
   env.nohoist <- None;
   (* 2 回目: 関数の本体 *)
@@ -723,7 +749,7 @@ let check (tops : int top list) : prog =
           (String.concat ", " (List.rev both)) h)
     env.hooks;
   { globals = List.rev !globals; arrays = List.rev !arrays; datas = List.rev !datas; luts = [];
-    fns; exts = List.rev !exts; pools = List.rev !pools }
+    fns; exts = List.rev !exts; pools = List.rev !pools; asms = List.rev !asms }
 
 (* for e in タスク を、普通の文に直す。フレームを先頭から順に見て、空きでないものだけ本体を実行する。
    増やすのを先頭でやるので、本体の continue はそのまま次の個体へ進む。 *)

@@ -159,6 +159,7 @@ let clobs ~info ~exts code =
        (fun (line, _) ->
          match line with
          | Ins (("call" | "jp"), [ I (Sym g) ]) when Hashtbl.mem info g -> (Hashtbl.find info g : Gen.info).clob
+         | Ins (("call" | "jp"), [ I (Sym g) ]) when List.mem_assoc g exts -> (let _, _, _, c = List.assoc g exts in c)
          | Ins (("call" | "jp"), [ I (Num n) ]) ->
            (match List.find_opt (fun (_, (_, _, addr, _)) -> addr = n) exts with
             | Some (_, (_, _, _, clob)) -> clob
@@ -606,6 +607,21 @@ let program1 ?hint ~opt (tg : target) (p : Check.prog) (fns : Ir.fn list) : line
     end
   in
   visit (Option.get (find "main"));
+  (* アセンブラで書いた関数。中から名前で呼ぶ関数（C の関数など）も出す *)
+  let rec syms_e acc = function
+    | Sym s -> s :: acc
+    | Add (x, y) | Bop (_, x, y) -> syms_e (syms_e acc x) y
+    | Lo x | Hi x | Uop (_, x) -> syms_e acc x
+    | Num _ | Here -> acc
+  in
+  let rec syms_a acc = function I e | X (_, e) -> syms_e acc e | M x -> syms_a acc x | R _ -> acc in
+  List.iter
+    (fun (name, lines) ->
+      code := !code @ (Rem ("asm " ^ name) :: Label name :: lines);
+      List.iter
+        (function Ins (_, args) -> List.iter (fun g -> Option.iter visit (find g)) (List.fold_left syms_a [] args) | _ -> ())
+        lines)
+    p.asms;
   (* コードに名前が出てくる置き場所だけ残す *)
   let used = Hashtbl.create 64 in
   let rec syms = function

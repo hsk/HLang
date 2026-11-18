@@ -82,12 +82,8 @@ let rec load read name =
 let where line = (try List.nth !files (line / 100000) with _ -> ""), line mod 100000
 
 (* read を渡せば import が使える。src は最初のファイルの中身。 *)
-let compile ?(target = msx) ?(opt = true) ?read src =
-  let tops =
-    match read with
-    | None -> Parse.parse src
-    | Some read -> files := []; load (fun f -> if f = "" then src else read f) ""
-  in
+(* 構文木から ROM まで *)
+let build ?(target = msx) ?(opt = true) tops =
   let prog = Lut.apply (Check.check tops) in
   let ir = Cps.convert prog in
   let size s =                                 (* 表や配列のバイト数 *)
@@ -104,6 +100,54 @@ let compile ?(target = msx) ?(opt = true) ?read src =
     try Asm.assemble ~org:target.org asm with Asm.Error m -> raise (Ast.Error (0, m))
   in
   { prog; ir; asm; bin; syms; org = target.org; target }
+
+let compile ?target ?opt ?read src =
+  let tops =
+    match read with
+    | None -> Parse.parse src
+    | Some read -> files := []; load (fun f -> if f = "" then src else read f) ""
+  in
+  build ?target ?opt tops
+
+(* C のファイル（いくつでも）をコンパイルする。read はパスから中身（なければ None）、incs は #include を探す所。
+   #include "x.hl" は hlang のファイルを取り込む（hl_read で探す）。 *)
+let compile_c ?target ?opt ~(read : string -> string option) ~(hl_read : string -> string) ~incs paths =
+  Cpp.files := [];
+  Cparse.reset ();
+  let find dirs name =
+    List.find_map (fun d -> let p = if d = "" then name else Filename.concat d name in Option.map (fun s -> p, s) (read p))
+      (if Filename.is_relative name then dirs else [ "" ])
+  in
+  let ctops =
+    List.map
+      (fun p ->
+        match read p with
+        | Some src ->
+          let ts = Cpp.run ~read:find ~incs p src in
+          files := !Cpp.files;                             (* エラーの行番号をファイル名に戻せるように *)
+          Cparse.parse ts
+        | None -> raise (Ast.Error (0, "ファイルがない: " ^ p)))
+      paths
+  in
+  (* hlang のファイルの関数の型（引数と戻り）。中の import もたどる *)
+  let rec sigs seen f =
+    if List.mem f !seen then []
+    else begin
+      seen := f :: !seen;
+      List.concat_map
+        (function
+          | Ast.Fn (fn, _) -> [ fn.name, (List.map snd fn.ps, fn.ret) ]
+          | Ast.Extern (name, args, ret, _, _, _) -> [ name, (List.map fst args, ret) ]
+          | Ast.Import (g, _) -> sigs seen g
+          | _ -> [])
+        (Parse.parse (hl_read f))
+    end
+  in
+  let tops = Clower.program ~hl_sigs:(fun f -> sigs (ref []) f) ctops in
+  (* hlang のファイルを取り込む。行番号は C のファイルの続きから *)
+  files := !Cpp.files;
+  let tops = List.concat_map (function Ast.Import (f, _) -> load hl_read f | t -> [ t ]) tops in
+  build ?target ?opt tops
 
 (* ROM イメージ。余りは 0xff で埋める。MSX は 16KB。
    SMS は 32KB で、最後の 16 バイトに "TMR SEGA" の印と、そこまでの全バイトの和を置く（海外版の本体が起動時に調べる）。 *)

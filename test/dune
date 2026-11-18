@@ -1,7 +1,7 @@
 (tests
- (names t_z80 t_asm t_lang t_sms t_zma)
- (modules t_z80 t_asm t_lang t_sms t_zma)
- (deps (glob_files ../lib/*.hl) (glob_files ../examples/*.hl))
+ (names t_z80 t_asm t_lang t_sms t_zma t_c)
+ (modules t_z80 t_asm t_lang t_sms t_zma t_c)
+ (deps (glob_files ../lib/*.hl) (glob_files ../examples/*.hl) (glob_files c/*))
  (libraries z80 hlang))
 
 ; 命令網羅テスト zexdoc / zexall を走らせる。数分かかるので dune test には入れない。

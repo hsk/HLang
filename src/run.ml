@@ -27,8 +27,9 @@ let traps exts (ext : string -> int list -> int) =
     | "hl" -> Z80.rp s 4
     | r -> s.r.(String.index "bcdehl_a" r.[0])
   in
-  List.map
+  List.filter_map
     (fun (name, (regs, ret, addr, _)) ->
+      if addr < 0 then None else Some
       ( addr,
         fun s ->
           let v = ext name (List.map (fun (_, r) -> get s r) regs) in
