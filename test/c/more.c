@@ -43,5 +43,12 @@ void main(void) {
     outh(cnt);
     hist[tick() & 3] = tick();   /* 右辺が先（13）、添字が後（14 & 3 = 2） */
     outh(hist[1]); outh(hist[2]);
+    /* u8 を広げずに 8 ビットで計算してよい所と、いけない所 */
+    u8 w = 0xe5;
+    if (w >= 3 * 24) out('a');
+    if (w + 0x20 > 0xff) out('b');          /* 繰り上がりがあるので 16 ビットで */
+    i16 m = -2;
+    outh(m & 0xf0); outh(m | 0x0f);
+    outh(((w + 0x20) & 0xc0) >> 3); outh((w + 0x20) >> 3); outh((w & 0xc0) >> 3);
     out('\n');
 }

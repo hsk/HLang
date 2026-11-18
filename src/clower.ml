@@ -211,6 +211,9 @@ and ty env (e : expr) =
 
 (* 値が必ず 0〜255 に入るか（下位 8 ビットだけで計算・比較してよいか） *)
 let rec fits8 env (e : expr) =
+  match cval env e with
+  | Some n -> n >= 0 && n <= 255
+  | None ->
   match e.e with
   | Num (n, _) | Chr n -> n >= 0 && n <= 255
   | Id _ | Index _ | Dot _ | Arrow _ | Un ("*", _) -> (match cval env e with Some n -> n >= 0 && n <= 255 | None -> ty_lv env e = u8t)
@@ -225,6 +228,9 @@ let rec fits8 env (e : expr) =
   | _ -> false
 
 let rec fitsi8 env (e : expr) =
+  match cval env e with
+  | Some n -> n >= -128 && n <= 127
+  | None ->
   match e.e with
   | Num (n, _) | Chr n -> n <= 127
   | Un ("-", a) -> (match cval env a with Some n -> n <= 128 | None -> false)
@@ -411,6 +417,12 @@ and arith env ln o a b =
      | Some 0 -> { x = mk ln (A.Cast (A.I16, d)); t = i16t }
      | Some k -> { x = mk ln (A.Cast (A.I16, mk ln (A.Bin (">>", d, int ln k)))); t = i16t }
      | None -> { x = mk ln (A.Cast (A.I16, mk ln (A.Bin ("/", d, int ln s)))); t = i16t })
+  | ">>" when fits8 env a && (match cval env b with Some n -> n >= 0 && n < 8 | None -> false) ->
+    (* 0〜255 の値の右シフトは 8 ビットで計算してから広げる（結果は同じ） *)
+    conv ln { x = mk ln (A.Bin (">>", rv8 env a, int ln (Option.get (cval env b)))); t = u8t } (promote ta)
+  | ("&" | "|" | "^") when is_int ta && is_int tb && (if o = "&" then fits8 env a || fits8 env b else fits8 env a && fits8 env b) ->
+    (* 結果が 0〜255 に収まるビット演算も 8 ビットで *)
+    conv ln { x = mk ln (A.Bin (o, rv8 env a, rv8 env b)); t = u8t } (usual ta tb)
   | "<<" | ">>" ->
     let a' = promote_v ln (rv env a) in
     (match cval env b with
