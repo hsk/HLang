@@ -1,4 +1,4 @@
-# v で始まるタグ（例: v0.1.0）を push すると、3 つの OS で hlc をビルドして、
+# v で始まるタグ（例: v0.1.0）を push すると、3 つの OS で hlc と hlcc をビルドして、
 # GitHub のリリースに zip / tar.gz を付けて公開する。
 #   git tag v0.1.0 && git push origin v0.1.0
 name: release
@@ -59,4 +59,4 @@ jobs:
         run: |
           gh release create "$TAG" hlang-* --repo "$GITHUB_REPOSITORY" \
             --title "hlang $TAG" --generate-notes \
-            --notes "hlc（hlang のコンパイラ）の実行ファイルです。展開したフォルダのまま使います（hlc と lib/ を並べておく）。Windows は PowerShell で .\\hlc.exe examples\\game.hl 、macOS・Linux は ./hlc examples/game.hl 。"
+            --notes "hlc（hlang のコンパイラ）と hlcc（C のサブセットを同じバックエンドでコンパイルする）の実行ファイルです。展開したフォルダのまま使います（hlc、hlcc と lib/ を並べておく）。Windows は PowerShell で .\\hlc.exe examples\\game.hl 、.\\hlcc.exe examples\\hello.c --run 。macOS・Linux は ./hlc examples/game.hl 、./hlcc examples/hello.c --run 。"

@@ -23,11 +23,13 @@ jobs:
         run: |
           opam exec -- dune exec bin/hlc.exe -- examples/game.hl
           opam exec -- dune exec bin/hlc.exe -- examples/sms_game.hl -sms
-      - name: 配布用にまとめる（hlc、lib、examples）
+          opam exec -- dune exec bin/hlcc.exe -- examples/hello.c
+      - name: 配布用にまとめる（hlc、hlcc、lib、examples）
         shell: bash
         run: |
           mkdir -p dist/hlang
           cp _build/default/bin/hlc.exe dist/hlang/
+          cp _build/default/bin/hlcc.exe dist/hlang/
           cp -r lib examples README.md dist/hlang/
           rm -f dist/hlang/examples/*.rom dist/hlang/examples/*.sms
       - uses: actions/upload-artifact@v4
