@@ -56,7 +56,7 @@ u16 fmulu(u16 a, u16 b, u8 n);
 #define FA NR
 #define FS (FA + NA * NPT)
 #define FB FS
-#define NBD 11                  /* 空の帯（色の面） */
+#define NBD 6                   /* 空の帯（色の面） */
 #define NF (FB + NBD)
 
 /* ---- VDP ---- */
@@ -299,7 +299,7 @@ static void frame(u8 back) {
                 quad(x, y, z, h, h);
             }
 
-    /* 空の帯: 奥の ZB に、地平線（カメラの高さで上下する）から、元の背景の段の位置へ。色の面 11 枚 */
+    /* 空の帯: 奥の ZB に、地平線（カメラの高さで上下する）の上へ。色の面 6 枚（下は地面が覆うので描かない） */
     i16 hor = (camy * 43) >> 10;
     for (u8 i = 0; i < NBD; i++)
         quad4(camx - 6000, camy - (BP[i] + hor) * 25, camx + 6000, camy - (BP[i + 1] + hor) * 25, ZB);
