@@ -12,7 +12,8 @@ module Interp = Interp
 module Lut = Lut
 module Ir = Ir
 module Cps = Cps
-module Opt = Opt
+module Const_fold = Const_fold
+module Cse = Cse
 module Ptr = Ptr
 module Report = Report
 module Live = Live
@@ -125,7 +126,7 @@ let build ?(target = msx) ?(opt = true) tops =
     | None, None -> None
   in
   let ir = if opt then Inline.program ir else ir in
-  let ir = if opt then List.map (fun f -> Opt.fn (Ptr.fn size (Iv.fn (Blk.fn (Opt.fn (Narrow.fn (Opt.fn f))))))) ir else ir in
+  let ir = if opt then List.map (fun f -> Cse.fn (Ptr.fn size (Iv.fn (Blk.fn (Cse.fn (Narrow.fn (Cse.fn f))))))) ir else ir in
   let asm1 target =
     let asm = Alloc.program ~opt target prog ir in
     let bin, syms = try Asm.assemble ~org:target.org asm with Asm.Error m -> raise (Ast.Error (0, m)) in

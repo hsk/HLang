@@ -1,4 +1,4 @@
-(* 中間表現の上での小さな最適化: 同じ計算を 2 回しない。定数だけの計算は済ませておく。
+(* 共通部分式の除去: 同じ計算を 2 回しない。ついでに、Const_fold で定数だけの計算も済ませる。
 
    変数は一度しか束縛されないので、同じ式はいつ計算しても同じ値になる。
    先に計算した変数がまだ見えている範囲なら、後の方をそれで置き換えられる。
@@ -22,34 +22,6 @@ let map_exp f = function
   | Load a -> Load (f a)
   | In p -> In p
 
-(* 定数だけの計算は、ここで済ませる。ラベルの番地 + 定数も、1 つの値にまとめる（boss.y は boss+1 番地）。 *)
-let fold ty e =
-  let m = if ty = U8 then 0xff else 0xffff in
-  let off c = let c = c land 0xffff in if c > 0x7fff then c - 0x10000 else c in
-  let c v = Some (C (v land m)) in
-  match e with
-  | Bin ("+", C a, C b) -> c (a + b)
-  | Bin ("-", C a, C b) -> c (a - b)
-  | Bin ("&", C a, C b) -> c (a land b)
-  | Bin ("|", C a, C b) -> c (a lor b)
-  | Bin ("^", C a, C b) -> c (a lxor b)
-  | Bin ("+", S (s, n), C k) | Bin ("+", C k, S (s, n)) when ty = U16 -> Some (S (s, n + off k))
-  | Bin ("-", S (s, n), C k) when ty = U16 -> Some (S (s, n - off k))
-  | Idx (s, C n) -> Some (S (s, n))
-  | Sh ("<<", C a, n) -> c (a lsl n)
-  | Sh (">>", C a, n) -> c ((a land m) lsr n)
-  | Sh ("sar", C a, n) -> let a = a land m in c ((if a > m / 2 then a - m - 1 else a) asr n)
-  | Mulc (C a, n) -> c (a * n)
-  | Un ("-", C a) -> c (-a)
-  | Un ("~", C a) -> c (lnot a)
-  | Zext (C a) | Trunc (C a) -> Some (C (a land 0xff))
-  | Sext (C a) -> let a = a land 0xff in Some (C (if a >= 0x80 then a lor 0xff00 else a))
-  | Cmp (o, t, C a, C b) ->
-    let m = if t = U8 then 0xff else 0xffff in
-    let a = a land m and b = b land m in
-    Some (C (Bool.to_int (match o with "==" -> a = b | "!=" -> a <> b | "<" -> a < b | "<=" -> a <= b | ">" -> a > b | _ -> a >= b)))
-  | _ -> None
-
 (* 同じ「番地 + 定数」を指す変数 -> 最初にそれを計算した変数。読み込み済みかを調べるのに使う *)
 let same : (string, string) Hashtbl.t = Hashtbl.create 16
 
@@ -66,7 +38,7 @@ let rec go sub pure loads t =
       | Some y -> go ((x, V y) :: sub) pure loads k
       | None -> Let (x, ty, e, keep ((ty, e), x))
     in
-    let e = match fold ty e with Some a -> Atom a | None -> e in
+    let e = match Const_fold.fold ty e with Some a -> Atom a | None -> e in
     (match e with
      | Atom a -> go ((x, a) :: sub) pure loads k
      | In _ -> Let (x, ty, e, go sub pure loads k)
