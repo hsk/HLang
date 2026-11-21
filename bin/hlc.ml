@@ -8,6 +8,7 @@
      hlc file.hl --report   関数ごとの大きさ、呼び出し規約、時間の上限、RAM の使い道を表示
      -O0 を付けると最適化しない（変数をすべてメモリに置く）
      -sms を付けると、セガ・マスターシステムの ROM（file.sms）を作る
+     -r800 を付けると、掛け算に R800 の命令（mulub、muluw）を使う。Z80 では動かない
      hlc file.hl --zma      ZMA の書き方のアセンブリを表示（HRA! さんの zma で組み立てられる）
      hlc file.zma           ZMA（.zma .asm .z80 .a80）を組み立てて file.bin を作る
                               --org N  開始番地（ファイルに org があればそちら）  -Dname=値  定数を決める  -Ipath  INCLUDE を探す所
@@ -23,6 +24,7 @@ let () =
     | [] -> ()
     | "-O0" :: r -> opt := false; args r
     | "-sms" :: r -> target := sms; args r
+    | "-r800" :: r -> Alloc.r800 := true; Z80.r800 := true; args r
     | "--org" :: v :: r -> org := Some (int_of_string v); args r
     | "--db" :: v :: r -> Scanf.sscanf v "%i-%i" (fun a b -> data := (a, b) :: !data); args r
     | a :: r when String.starts_with ~prefix:"-D" a ->

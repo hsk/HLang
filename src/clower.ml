@@ -433,7 +433,6 @@ and arith env ln o a b =
      | Some _ -> err ln "シフトの量は 0〜15"
      | None -> { x = shift env ln o a'.x (hl ln a'.t) (rv8 env b); t = a'.t })
   | _ ->
-    if o = "*" && cval env a = None && cval env b = None then err ln "掛け算は、片方が定数のときだけ（hlang の制限）";
     let t = usual ta tb in
     let a' = conv ln (rv env a) t and b' = conv ln (rv env b) t in
     { x = mk ln (A.Bin (o, a'.x, b'.x)); t }
@@ -463,7 +462,7 @@ and rv8 env (e : expr) : int A.expr =
   | None ->
     match e.e with
     | Bin ((("+" | "-" | "&" | "|" | "^") as o), a, b) when ints () -> mk ln (A.Bin (o, rv8 env a, rv8 env b))
-    | Bin ("*", a, b) when ints () && (cval env a <> None || cval env b <> None) -> mk ln (A.Bin ("*", rv8 env a, rv8 env b))
+    | Bin ("*", a, b) when ints () -> mk ln (A.Bin ("*", rv8 env a, rv8 env b))
     | Bin ("<<", a, b) when ints () ->
       (match cval env b with
        | Some n when n >= 0 && n < 8 -> mk ln (A.Bin ("<<", rv8 env a, int ln n))
@@ -1043,6 +1042,9 @@ let program ~(hl_sigs : string -> (string * hsig) list) (tus : top list list) : 
   let tops = fall_through tops in
   (* hlang の組み込み: 割り込みの許可と禁止、copy など *)
   List.iter (fun f -> Hashtbl.replace env.hfuns f ([], A.Unit)) Asm.bare;
+  (* 固定小数点の掛け算: fmul(a, b, n) = (a * b) >> n（32 ビットの積）。fmulu は符号なし *)
+  Hashtbl.replace env.hfuns "fmul" ([ A.I16; A.I16; A.U8 ], A.I16);
+  Hashtbl.replace env.hfuns "fmulu" ([ A.U16; A.U16; A.U8 ], A.U16);
   List.iter (fun (f, (regs, _, _)) ->
       if f.[0] <> '.' then
         Hashtbl.replace env.hfuns f (List.map (fun r -> if String.length r = 2 then A.U16 else A.U8) regs, if f = "inp" then A.U8 else A.Unit))

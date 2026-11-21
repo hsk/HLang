@@ -95,6 +95,10 @@ let load (p : Check.prog) w =
       0
     | None, "out", [ port; v ] -> w.out port v; 0
     | None, "inp", [ port ] -> w.inp port land 0xff
+    | None, "fmul", [ a; b; n ] ->                    (* 符号付き: 32 ビットの積を n ビット右へ *)
+      let s v = if v >= 0x8000 then v - 0x10000 else v in
+      (s a * s b) asr n land 0xffff
+    | None, "fmulu", [ a; b; n ] -> (a * b) lsr n land 0xffff
     | None, _, _ -> w.ext f args
     | Some g, _, _ ->
       let vars = Hashtbl.create 16 in

@@ -96,12 +96,20 @@ let rec exp (env : env) (e : A.ty A.expr) (k : atom -> term) : term =
     let o = if o = ">>" && A.signed l.a then "sar" else o in      (* 符号付きの >> は、符号ビットを保つ *)
     exp env l (fun a -> bind t (Sh (o, a, n)) k)
   | Bin ("*", l, { x = Int n; _ }) -> exp env l (fun a -> bind t (Mulc (a, n)) k)
+  | Bin ("*", l, r) ->
+    (* 変数どうしの掛け算は、実行時のルーチン（Alloc の muls）を呼ぶ。下の桁は符号があってもなくても同じ *)
+    exp env l (fun a -> exp env r (fun b ->
+      let x = fresh "t" in Call (Some (x, t), (if t = U8 then ".mul8" else ".mul16"), [ a, t; b, t ], k (V x))))
   | Bin ((("/" | "%") as o), l, r) ->
     (* 割り算と余りは、実行時のルーチン（Alloc の divmod）を呼ぶ *)
     let f = (if A.signed e.a then "s" else "") ^ (if o = "/" then "div" else "mod") ^ if t = U8 then "8" else "16" in
     exp env l (fun a -> exp env r (fun b -> let x = fresh "t" in Call (Some (x, t), "." ^ f, [ a, t; b, t ], k (V x))))
   | Bin (o, l, r) -> exp env l (fun a -> exp env r (fun b -> bind t (Bin (o, a, b)) k))
   | Un (o, a) -> exp env a (fun a -> bind t (Un (o, a)) k)
+  | Call ((("fmul" | "fmulu") as f), [ a; b; { x = Int n; _ } ]) ->
+    exp env a (fun a -> exp env b (fun b ->
+      let x = fresh "t" in
+      Call (Some (x, U16), (if f = "fmul" then ".sfmul16" else ".fmul16"), [ a, U16; b, U16; C n, U8 ], k (V x))))
   | Call (f, args) ->
     let rec go acc = function
       | [] ->

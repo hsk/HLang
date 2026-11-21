@@ -27,6 +27,37 @@ let msx : Alloc.target = {
   head = Asm.[ Db [ Num 0x41; Num 0x42 ]; Dw [ Sym "start" ]; Ds 12 ];
 }
 
+(* 16KB に入らないときは 32KB（0x4000〜0xbfff）にする。BIOS が開くのは 0x4000〜0x7fff（ページ 1）だけなので、
+   ヘッダのすぐ後ろに、自分のスロットをページ 2 にも出すコードを置く。
+   RSLREG（0x138）で今の基本スロットを読み、ページ 1 のスロット番号を取り出す。拡張されたスロットなら
+   EXPTBL（0xfcc1）の上位ビットと SLTTBL（0xfcc5）の拡張スロット番号を足して、ENASLT（0x24）でページ 2 に出す。 *)
+let page2 =
+  let open Asm in
+  let ins op args = Ins (op, args) and r x = R x and n v = I (Num v) in
+  [ ins "call" [ n 0x138 ]; ins "rrca" []; ins "rrca" []; ins "and" [ n 3 ]; ins "ld" [ r "c"; r "a" ];
+    ins "ld" [ r "b"; n 0 ]; ins "ld" [ r "hl"; n 0xfcc1 ]; ins "add" [ r "hl"; r "bc" ];
+    ins "ld" [ r "a"; M (r "hl") ]; ins "and" [ n 0x80 ]; ins "or" [ r "c" ]; ins "ld" [ r "c"; r "a" ];
+    ins "inc" [ r "hl" ]; ins "inc" [ r "hl" ]; ins "inc" [ r "hl" ]; ins "inc" [ r "hl" ];
+    ins "ld" [ r "a"; M (r "hl") ]; ins "and" [ n 0x0c ]; ins "or" [ r "c" ];
+    ins "ld" [ r "h"; n 0x80 ]; ins "call" [ n 0x24 ] ]
+
+let msx32 : Alloc.target =
+  { msx with
+    head = Asm.[ Db [ Num 0x41; Num 0x42 ]; Dw [ Sym ".msx32" ]; Ds 12; Label ".msx32" ]
+           @ page2 @ [ Asm.Ins ("jp", [ I (Sym "start") ]) ] }
+
+(* メガロム（ASCII8）: 8KB のバンクを 0x4000、0x6000、0x8000、0xa000 に出す。バンクの番号は 0x6000、0x6800、0x7000、
+   0x7800 に書く。プログラムは 24KB まで、必要なら 32KB まで置ける。-bank のデータバンクはプログラム長の後ろに続く。 *)
+let msx8 : Alloc.target =
+  let open Asm in
+  let ins op args = Ins (op, args) and r x = R x and n v = I (Num v) in
+  { msx with
+    head = [ Db [ Num 0x41; Num 0x42 ]; Dw [ Sym ".msx8" ]; Ds 12; Label ".msx8" ]
+           @ page2
+           @ List.concat_map (fun (a, b) -> [ ins "ld" [ r "a"; n b ]; ins "ld" [ M (n a); r "a" ] ])
+               [ 0x6800, 1; 0x7000, 2; 0x7800, 3 ]
+           @ [ ins "jp" [ I (Sym "start") ] ] }
+
 (* セガ・マスターシステム: 0 番地から 32KB。RAM は 0xc000 から。
    0 番地が起動、0x38 が画面の割り込み、0x66 がポーズボタン（NMI）と決まっているので、先頭にその 3 つを置く。
    割り込みはレジスタを全部しまい、VDP の状態を読んで（読まないと次が来ない）、RAM のフック sms_hook を呼ぶ。
@@ -95,9 +126,15 @@ let build ?(target = msx) ?(opt = true) tops =
   in
   let ir = if opt then Inline.program ir else ir in
   let ir = if opt then List.map (fun f -> Opt.fn (Ptr.fn size (Iv.fn (Blk.fn (Opt.fn (Narrow.fn (Opt.fn f))))))) ir else ir in
-  let asm = Alloc.program ~opt target prog ir in
-  let bin, syms =
-    try Asm.assemble ~org:target.org asm with Asm.Error m -> raise (Ast.Error (0, m))
+  let asm1 target =
+    let asm = Alloc.program ~opt target prog ir in
+    let bin, syms = try Asm.assemble ~org:target.org asm with Asm.Error m -> raise (Ast.Error (0, m)) in
+    asm, bin, syms
+  in
+  let asm, bin, syms = asm1 target in
+  (* MSX で 16KB を超えたら、32KB の ROM として作り直す *)
+  let target, (asm, bin, syms) =
+    if target == msx && String.length bin > 0x4000 then msx32, asm1 msx32 else target, (asm, bin, syms)
   in
   { prog; ir; asm; bin; syms; org = target.org; target }
 
@@ -149,14 +186,16 @@ let compile_c ?target ?opt ~(read : string -> string option) ~(hl_read : string 
   let tops = List.concat_map (function Ast.Import (f, _) -> load hl_read f | t -> [ t ]) tops in
   build ?target ?opt tops
 
-(* ROM イメージ。余りは 0xff で埋める。MSX は 16KB。
+(* ROM イメージ。余りは 0xff で埋める。MSX は 16KB（入らなければ 32KB）。
    SMS は 32KB で、最後の 16 バイトに "TMR SEGA" の印と、そこまでの全バイトの和を置く（海外版の本体が起動時に調べる）。 *)
 let rom r =
   let fill size =
     if String.length r.bin > size then raise (Ast.Error (0, "ROM に入りきらない"));
     r.bin ^ String.make (size - String.length r.bin) '\xff'
   in
-  if r.target != sms then fill 0x4000
+  if r.target == msx32 then fill 0x8000
+  else if r.target == msx8 then fill (if String.length r.bin > 0x6000 then 0x8000 else 0x6000)
+  else if r.target != sms then fill 0x4000
   else begin
     let body = fill 0x7ff0 in
     let sum = String.fold_left (fun n c -> (n + Char.code c) land 0xffff) 0 body in

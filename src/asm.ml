@@ -147,6 +147,9 @@ let enc_hl v pc (op, args) =
   | "add", [ R "hl"; q ] when is (rp q) -> [ 0x09 + (16 * !(rp q)) ]
   | "adc", [ R "hl"; q ] when is (rp q) -> [ 0xed; 0x4a + (16 * !(rp q)) ]
   | "sbc", [ R "hl"; q ] when is (rp q) -> [ 0xed; 0x42 + (16 * !(rp q)) ]
+  (* R800 の掛け算。mulub a,r: HL = A * r（r は b c d e）。muluw hl,bc: DE:HL = HL * BC（どちらも符号なし） *)
+  | "mulub", [ R "a"; (R ("b" | "c" | "d" | "e") as x) ] -> [ 0xed; 0xc1 + (8 * !(r8 x)) ]
+  | "muluw", [ R "hl"; (R ("bc" | "sp") as q) ] -> [ 0xed; 0xc3 + (16 * !(rp q)) ]
   (* 8bit 演算。add a,b と sub b の両方の書き方を受ける *)
   | _, ([ R "a"; x ] | [ x ]) when List.mem op alu && is (r8 x) ->
     [ 0x80 + (8 * !(index op alu)) + !(r8 x) ]
@@ -252,6 +255,8 @@ let writes (op, args) =
   | ("ldi" | "ldd" | "ldir" | "lddr"), _ -> [ "b"; "c"; "d"; "e"; "h"; "l" ]
   | ("cpi" | "cpd" | "cpir" | "cpdr"), _ -> [ "b"; "c"; "h"; "l" ]
   | ("ini" | "ind" | "inir" | "indr" | "outi" | "outd" | "otir" | "otdr"), _ -> [ "b"; "h"; "l" ]
+  | "mulub", _ -> [ "h"; "l" ]                            (* R800 *)
+  | "muluw", _ -> [ "d"; "e"; "h"; "l" ]
   | _ -> all8
 
 (* ---- 全体を組み立てる。2 回なめる: 1 回目で番地を決め、2 回目で値を埋める ---- *)

@@ -47,6 +47,8 @@ let dis rd pc =
     | 1, 2 -> (if q = 0 then "sbc" else "adc"), [ R "hl"; rp p ]
     | 1, 3 when p <> 2 -> let a = M (nn ()) in "ld", if q = 0 then [ a; rp p ] else [ rp p; a ]
     | 1, 6 when y = 0 || y = 2 || y = 3 -> "im", [ I (Num (max 0 (y - 1))) ]
+    | 3, 1 when y < 4 -> "mulub", [ R "a"; r8 y ]                       (* R800: mulub a,b/c/d/e *)
+    | 3, 3 when q = 0 && (p = 0 || p = 3) -> "muluw", [ R "hl"; rp p ]  (* muluw hl,bc / hl,sp *)
     | 1, 7 when y < 4 ->
       "ld", List.nth [ [ R "i"; R "a" ]; [ R "r"; R "a" ]; [ R "a"; R "i" ]; [ R "a"; R "r" ] ] y
     | _ ->

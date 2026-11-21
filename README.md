@@ -215,12 +215,13 @@ C:\hlang\hlc.exe main.hl
 
 | コマンド | すること |
 | --- | --- |
-| `hlc file.hl` | `file.rom`（MSX の 16KB ROM カートリッジ）を、ソースと同じフォルダに作る |
+| `hlc file.hl` | `file.rom`（MSX の 16KB ROM カートリッジ。入らなければ 32KB）を、ソースと同じフォルダに作る |
 | `hlc file.hl -sms` | `file.sms`（セガ・マスターシステムの 32KB ROM）を作る |
 | `hlc file.hl --run` | 内蔵のエミュレータで走らせ、MSX の文字出力（CHPUT）を表示する |
 | `hlc file.hl --asm` | 出すアセンブリを表示する（`--list` は番地と機械語つき、`--syms` はラベルの番地） |
 | `hlc file.hl --report` | 関数ごとの大きさ、呼び出し規約、時間の上限、RAM の使い道を表示する |
 | `-O0` | 最適化しない（変数をすべてメモリに置く）。コンパイルは一瞬 |
+| `-r800` | 掛け算に R800 の命令（`mulub`、`muluw`）を使う。Z80 では動かない |
 
 `hlcc`（C）:
 
@@ -228,7 +229,8 @@ C:\hlang\hlc.exe main.hl
 | --- | --- |
 | `hlcc main.c a.c b.c` | ファイルをまとめて 1 つのプログラムにし、最初のファイルの名前で ROM を作る（main.c なら main.rom） |
 | `hlcc ... -Ipath` | `#include "..."` を探す場所を足す |
-| `-sms`、`-O0`、`--run`、`--asm`、`--list`、`--syms` | `hlc` と同じ |
+| `-sms`、`-O0`、`-r800`、`--run`、`--asm`、`--list`、`--syms` | `hlc` と同じ |
+| `hlcc ... -megarom -bank a.bin -bank b.bin` | メガロム（ASCII8）を作る。プログラムは 0x4000〜0x9fff（24KB）、`-bank` のファイルは 8KB ごとのバンク（3 番から）として後ろに足す。openMSX では `-romtype ASCII8` を付ける |
 
 ROM を作ると、`examples/game.rom: 1348 バイト` のように、作ったファイルと大きさが出ます。エラーは `ファイル:行: 内容` の形で出て、終了コードが 0 以外になります。
 
@@ -273,6 +275,8 @@ Windows では、WSL2 の中（[docs/wsl.md](docs/wsl.md)）でも、ネイテ�
 | [hello.c](examples/hello.c) | C で書いた例（hlcc） |
 | [damaxian_c/](examples/damaxian_c/) | DAMAXIAN（MSX）の C 版。`make run` は SDCC、`make run2` は hlcc |
 | [damaxian_hl/](examples/damaxian_hl/) | DAMAXIAN（MSX）の hlang 版。`make run` |
+| [billboard_c/](examples/billboard_c/) | V9968 + geo3d のビルボード（C、hlcc）。VRAM 4MB のバンクにアニメーションのコマを置く |
+| [race_c/](examples/race_c/) | V9968 + geo3d v2.0 で、空に浮いたコースを走るレース（C、hlcc）。コースは geo3d に置いたまま |
 | [hello.hl](examples/hello.hl) | 文字を出す |
 | [script.hl](examples/script.hl) `vm.hl` | バイトコードマシン |
 | [music.hl](examples/music.hl) `tracks.hl` | 曲のバイトコードをタスクが読んで、PSG を鳴らす |

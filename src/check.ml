@@ -306,16 +306,22 @@ let rec chk env want e =
         let l = chk env (Some (num_ty [ l ])) l in
         { x = Bin (o, l, { x = Int n; a = U8 }); a = l.a }
       | Bin ("*", l, r) ->
-        (* 片方が定数の掛け算だけ。2 のべき乗ならシフトに直す。定数は右に寄せる。 *)
-        let l, n = match ceval env l, ceval env r with
-          | _, Some n when n >= 0 -> l, n
-          | Some n, _ when n >= 0 -> r, n
-          | _ -> err ln "掛け算は、片方が 0 以上の定数のときだけ"
+        (* 片方が 0 以上の定数なら定数倍。2 のべき乗ならシフトに直す。定数は右に寄せる。
+           どちらも変数なら、実行時のルーチン（.mul8、.mul16）で掛ける。結果は型の幅の下の桁。 *)
+        let c = match ceval env l, ceval env r with
+          | _, Some n when n >= 0 -> Some (l, n)
+          | Some n, _ when n >= 0 -> Some (r, n)
+          | _ -> None
         in
-        let l = chk env (Some (num_ty [ l ])) l in
-        (match log2 n with
-         | Some k -> { x = Bin ("<<", l, { x = Int k; a = U8 }); a = l.a }
-         | None -> { x = Bin ("*", l, { x = Int (n land mask l.a); a = l.a }); a = l.a })
+        (match c with
+         | Some (l, n) ->
+           let l = chk env (Some (num_ty [ l ])) l in
+           (match log2 n with
+            | Some k -> { x = Bin ("<<", l, { x = Int k; a = U8 }); a = l.a }
+            | None -> { x = Bin ("*", l, { x = Int (n land mask l.a); a = l.a }); a = l.a })
+         | None ->
+           let t = num_ty [ l; r ] in
+           { x = Bin ("*", chk env (Some t) l, chk env (Some t) r); a = t })
       | Bin ((("/" | "%") as o), l, r) ->
         (* 符号なしの数を 2 のべき乗で割るならシフトとマスクで済む。それ以外は実行時のルーチンを呼ぶ。 *)
         let t = num_ty [ l; r ] in
@@ -348,6 +354,14 @@ let rec chk env want e =
         let bump = { x = Bin ("+", p, { x = Int n; a = U16 }); a = U16 } in
         env.pre <- Set (p, bump) :: Let (tmp, Some t, { x = Mem (t, p); a = t }) :: env.pre;
         { x = Var tmp; a = t }
+      | Call ((("fmul" | "fmulu") as f), [ a; b; n ]) ->
+        (* 固定小数点の掛け算: (a * b) >> n。積は 32 ビットで持つ。fmul は符号付き、fmulu は符号なし *)
+        let t = if f = "fmul" then I16 else U16 in
+        let n = match ceval env n with
+          | Some n when n >= 0 && n <= 16 -> n
+          | _ -> err ln "%s のずらす量は 0〜16 の定数だけ" f
+        in
+        { x = Call (f, [ chk env (Some t) a; chk env (Some t) b; { x = Int n; a = U8 } ]); a = t }
       | Call (f, args) ->
         let ps, ret = match Hashtbl.find_opt env.sigs f with
           | Some s -> s
@@ -579,6 +593,7 @@ let check (tops : int top list) : prog =
       Hashtbl.replace builtin f ();
       Hashtbl.replace env.sigs f (List.map (fun r -> if String.length r = 2 then U16 else U8) regs, if f = "inp" then U8 else Unit))
     Asm.prims;
+  List.iter (fun (f, t) -> Hashtbl.replace builtin f (); Hashtbl.replace env.sigs f ([ t; t; U8 ], t)) [ "fmul", I16; "fmulu", U16 ];
   (* 1 回目: 名前と型を集める。関数は定義より前で呼べる。 *)
   let globals = ref [] and exts = ref [] and arrays = ref [] and datas = ref [] and asms = ref [] in
   List.iter

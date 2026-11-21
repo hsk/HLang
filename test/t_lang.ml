@@ -388,6 +388,26 @@ fn main() {
   a /= 3  w %= 1000  puth(a) puth(w)
   digits(987)
 }|}, "001c 0004 0019 0000 0001 0000 0007 00a6 00c8 0c35 0000 0001 2710 0001 ffff 00c8 ffff c350 008e 0006 0042 0000 987";
+  "掛け算", {|
+fn main() {
+  var a: u8 = 200
+  var b: u8 = 7
+  var w: u16 = 50000
+  var v: u16 = 3
+  var s: i16 = -300
+  var t: i16 = 123
+  var c: i8 = -5
+  var d: i8 = 9
+  puth(a * b)                     // u16 の場所では 16bit で掛ける
+  var e: u8 = a * b               // u8 の場所では下の 8bit
+  puth(e)
+  puth(w * v) puth(s * t) puth((c * d) as u16) puth(s * -3)
+  puth(fmul(s, t, 8)) puth(fmul(16384, s, 14)) puth(fmul(s, s, 16))     // 32bit の積を右へずらす
+  puth(fmulu(w, w, 16)) puth(fmulu(w, v, 0)) puth(fmul(-32768, -32768, 16))
+  var x: u16 = 1
+  for i in 0..10 { x = x * v }
+  puth(x)
+}|}, "0578 0078 49f0 6fdc ffd3 0384 ff6f fed4 0001 9502 49f0 4000 e6a9 ";
   "添字をポインタに直す", {|
 var st: [u8; 16]
 var q: [u8; 8]
@@ -1010,6 +1030,18 @@ let () =
         cases)
     [ "lin"; "bin"; "tab" ];
   Gen.only := None;
+  (* R800 の命令（mulub、muluw）で掛けても、結果は同じはず *)
+  Alloc.r800 := true; Z80.r800 := true;
+  List.iter
+    (fun (name, src, want) ->
+      if name = "掛け算" then
+        match both src with
+        | Out got when got = want -> ()
+        | Out got -> incr fails; Printf.printf "NG %s（R800）\n  期待: %S\n  結果: %S\n" name want got
+        | Skip _ -> ()
+        | Fail m -> incr fails; Printf.printf "NG %s（R800）: %s\n" name m)
+    cases;
+  Alloc.r800 := false; Z80.r800 := false;
   for seed = 1 to 60 do
     Gen.only := List.nth [ None; Some "lin"; Some "bin"; Some "tab" ] (seed mod 4);
     match both (make_match seed) with

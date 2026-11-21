@@ -413,9 +413,67 @@ let pool_code t n size =
       Label (l "count"); ins "ld" [ a; M hl ]; ins "or" [ a ]; ins "jr" [ R "z"; I (Sym (l "skip")) ]; ins "inc" [ R "c" ];
       Label (l "skip"); ins "add" [ hl; de ]; ins "djnz" [ I (Sym (l "count")) ]; ins "ld" [ a; R "c" ]; ins "ret" [] ] ]
 
+(* R800 の掛け算の命令（mulub、muluw）を使うか。hlc / hlcc の -r800 で true *)
+let r800 = ref false
+
+(* 掛け算のルーチン。下の divmod に足す。
+   .mul8 と .mul16 は積の下の桁だけ（符号があってもなくても同じ）。
+   .fmul16 と .sfmul16 は、32 ビットの積を A ビット右へずらした下の 16 ビット（固定小数点の掛け算）。 *)
+let muls () =
+  let ins op args = Ins (op, args) and r x = R x and to_ l = I (Sym l) in
+  let hl = r "hl" and de = r "de" and a = r "a" in
+  let z80 = not !r800 in
+  [ ".mul8", [ "a"; "e" ], (if z80 then [ "a"; "b"; "d" ] else [ "a"; "h"; "l" ]),
+    (if z80 then [                                            (* A * E。上の桁から「2 倍して、桁が 1 なら足す」 *)
+      Label ".mul8"; ins "ld" [ r "d"; a ]; ins "xor" [ a ]; ins "ld" [ r "b"; I (Num 8) ];
+      Label ".mul8.bit"; ins "add" [ a; a ]; ins "sla" [ r "d" ]; ins "jr" [ r "nc"; to_ ".mul8.next" ]; ins "add" [ a; r "e" ];
+      Label ".mul8.next"; ins "djnz" [ to_ ".mul8.bit" ]; ins "ret" [] ]
+     else [ Label ".mul8"; ins "mulub" [ a; r "e" ]; ins "ld" [ a; r "l" ]; ins "ret" [] ]);
+    ".mul16", [ "hl"; "de" ], (if z80 then [ "a"; "b"; "c"; "d"; "e"; "h"; "l" ] else [ "b"; "c"; "d"; "e"; "h"; "l" ]),
+    (if z80 then [                                            (* HL * DE の下 16 ビット *)
+      Label ".mul16"; ins "ld" [ r "b"; r "h" ]; ins "ld" [ r "c"; r "l" ]; ins "ld" [ hl; I (Num 0) ]; ins "ld" [ a; I (Num 16) ];
+      Label ".mul16.bit"; ins "add" [ hl; hl ]; ins "sla" [ r "e" ]; ins "rl" [ r "d" ]; ins "jr" [ r "nc"; to_ ".mul16.next" ];
+      ins "add" [ hl; r "bc" ];
+      Label ".mul16.next"; ins "dec" [ a ]; ins "jr" [ r "nz"; to_ ".mul16.bit" ]; ins "ret" [] ]
+     else [ Label ".mul16"; ins "ld" [ r "b"; r "d" ]; ins "ld" [ r "c"; r "e" ]; ins "muluw" [ hl; r "bc" ]; ins "ret" [] ]);
+    ".umul32", [ "hl"; "de" ], (if z80 then all8 else [ "b"; "c"; "d"; "e"; "h"; "l" ]),
+    (if z80 then [                                            (* DE:HL = HL * DE（符号なし） *)
+      Label ".umul32"; ins "ld" [ r "b"; r "h" ]; ins "ld" [ r "c"; r "l" ]; ins "ld" [ hl; I (Num 0) ]; ins "ld" [ a; I (Num 16) ];
+      Label ".umul32.bit"; ins "add" [ hl; hl ]; ins "rl" [ r "e" ]; ins "rl" [ r "d" ]; ins "jr" [ r "nc"; to_ ".umul32.next" ];
+      ins "add" [ hl; r "bc" ]; ins "jr" [ r "nc"; to_ ".umul32.next" ]; ins "inc" [ de ];
+      Label ".umul32.next"; ins "dec" [ a ]; ins "jr" [ r "nz"; to_ ".umul32.bit" ]; ins "ret" [] ]
+     else [ Label ".umul32"; ins "ld" [ r "b"; r "d" ]; ins "ld" [ r "c"; r "e" ]; ins "muluw" [ hl; r "bc" ]; ins "ret" [] ]);
+    ".fmul16", [ "hl"; "de"; "a" ], all8, [
+      Label ".fmul16"; ins "push" [ r "af" ]; ins "call" [ to_ ".umul32" ]; ins "pop" [ r "af" ]; ins "jp" [ to_ ".shr32" ] ];
+    ".sfmul16", [ "hl"; "de"; "a" ], all8, [                  (* 符号付き: 絶対値どうしで掛けて、2 つの符号が違えば符号を変える *)
+      Label ".sfmul16"; ins "push" [ r "af" ]; ins "ld" [ a; r "h" ]; ins "xor" [ r "d" ]; ins "push" [ r "af" ];
+      ins "call" [ to_ ".abs16" ]; ins "call" [ to_ ".umul32" ];
+      ins "pop" [ r "af" ]; ins "call" [ r "m"; to_ ".neg32" ]; ins "pop" [ r "af" ]; ins "jp" [ to_ ".sar32" ] ];
+    ".shr32", [], [ "a"; "d"; "e"; "h"; "l" ], [               (* DE:HL を A ビット右へ（上は 0 が入る）。8 ビットずつ先に送る *)
+      Label ".shr32"; ins "cp" [ I (Num 8) ]; ins "jr" [ r "c"; to_ ".shr32.bits" ];
+      ins "ld" [ r "l"; r "h" ]; ins "ld" [ r "h"; r "e" ]; ins "ld" [ r "e"; r "d" ]; ins "ld" [ r "d"; I (Num 0) ];
+      ins "sub" [ I (Num 8) ]; ins "jr" [ to_ ".shr32" ];
+      Label ".shr32.bits"; ins "or" [ a ]; ins "ret" [ r "z" ];
+      Label ".shr32.bit"; ins "srl" [ r "d" ]; ins "rr" [ r "e" ]; ins "rr" [ r "h" ]; ins "rr" [ r "l" ];
+      ins "dec" [ a ]; ins "jr" [ r "nz"; to_ ".shr32.bit" ]; ins "ret" [] ];
+    ".sar32", [], [ "a"; "d"; "e"; "h"; "l" ], [               (* 符号を保って右へ *)
+      Label ".sar32"; ins "cp" [ I (Num 8) ]; ins "jr" [ r "c"; to_ ".sar32.bits" ];
+      ins "ld" [ r "l"; r "h" ]; ins "ld" [ r "h"; r "e" ]; ins "ld" [ r "e"; r "d" ]; ins "ld" [ r "d"; I (Num 0) ];
+      ins "bit" [ I (Num 7); r "e" ]; ins "jr" [ r "z"; to_ ".sar32.pos" ]; ins "dec" [ r "d" ];
+      Label ".sar32.pos"; ins "sub" [ I (Num 8) ]; ins "jr" [ to_ ".sar32" ];
+      Label ".sar32.bits"; ins "or" [ a ]; ins "ret" [ r "z" ];
+      Label ".sar32.bit"; ins "sra" [ r "d" ]; ins "rr" [ r "e" ]; ins "rr" [ r "h" ]; ins "rr" [ r "l" ];
+      ins "dec" [ a ]; ins "jr" [ r "nz"; to_ ".sar32.bit" ]; ins "ret" [] ];
+    ".neg32", [], [ "a"; "d"; "e"; "h"; "l" ], [               (* DE:HL の符号を変える *)
+      Label ".neg32"; ins "xor" [ a ]; ins "sub" [ r "l" ]; ins "ld" [ r "l"; a ];
+      ins "ld" [ a; I (Num 0) ]; ins "sbc" [ a; r "h" ]; ins "ld" [ r "h"; a ];
+      ins "ld" [ a; I (Num 0) ]; ins "sbc" [ a; r "e" ]; ins "ld" [ r "e"; a ];
+      ins "ld" [ a; I (Num 0) ]; ins "sbc" [ a; r "d" ]; ins "ld" [ r "d"; a ]; ins "ret" [] ] ]
+
 (* 割り算と余りのルーチン: (名前, 引数の置き場所, 壊すレジスタ, コード)。使われたものだけ ROM に入る。
-   1 ビットずつ、余りを左へ送りながら引けるか試す。0 で割ると商は全ビット 1、余りは割られる数。 *)
-let divmod =
+   1 ビットずつ、余りを左へ送りながら引けるか試す。0 で割ると商は全ビット 1、余りは割られる数。
+   掛け算のルーチン（muls）も、ここに並べる。 *)
+let divmod () =
   let ins op args = Ins (op, args) and r x = R x and to_ l = I (Sym l) in
   let hl = r "hl" and de = r "de" and a = r "a" in
   [ ".mod8", [ "a"; "e" ], [ "a"; "b"; "d" ], [               (* A / E。余りが A、商が D *)
@@ -467,6 +525,7 @@ let divmod =
     ".neg16", [], [ "a"; "h"; "l" ], [                          (* HL の符号を変える *)
       Label ".neg16"; ins "xor" [ a ]; ins "sub" [ r "l" ]; ins "ld" [ r "l"; a ]; ins "sbc" [ a; a ]; ins "sub" [ r "h" ];
       ins "ld" [ r "h"; a ]; ins "ret" [] ] ]
+  @ muls ()
 
 let fn ?hint ~opt ~info ~exts (f : Ir.fn) =
   let go hint = solve ?hint ~opt ~info ~exts f (L.annotate f) (L.vars f) in
@@ -523,6 +582,7 @@ let rec uses t =
   | Ir.Ret r -> syms (List.map fst (Option.to_list r))
 
 let program1 ?hint ~opt (tg : target) (p : Check.prog) (fns : Ir.fn list) : line list =
+  let divmod = divmod () in
   let info = Hashtbl.create 16 in
   let code = ref [] and slots = ref [] and tables = ref [] in
   (* 呼ばれる側から先に決める。呼ぶ側は、相手の引数の置き場所と壊すレジスタを見て決められる。 *)

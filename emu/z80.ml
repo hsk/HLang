@@ -327,6 +327,9 @@ let rxd s left =
   else (wb s e (x lsl 4 lor (v lsr 4)); seta s (x land 0xf0 lor (v land 15)));
   setf s (f s land cf lor szp (a s))
 
+(* R800 の掛け算（MULUB、MULUW）を実行するか。Z80 では未定義の命令（NOP）なので、ふだんは false *)
+let r800 = ref false
+
 let ed s =
   let op = m1 s in
   let x = op lsr 6 and y = op lsr 3 land 7 and z = op land 7 in
@@ -358,6 +361,17 @@ let ed s =
      | 5 -> rxd s true
      | _ -> ())
   | 2, _ when z < 4 && y > 3 -> block s y z
+  | 3, 1 when !r800 && y < 4 ->                       (* MULUB A,r: HL = A * r（r は B C D E） *)
+    let v = a s * s.r.(y) in
+    tick s 10;
+    set16 s 2 v;
+    setf s ((if v = 0 then zf else 0) lor (if v > 0xff then cf else 0))
+  | 3, 3 when !r800 && q = 0 && (p = 0 || p = 3) ->   (* MULUW HL,BC / HL,SP: DE:HL = HL * rr *)
+    let v = get16 s 2 * (if p = 0 then rp s 0 else s.sp) in
+    tick s 32;
+    set16 s 2 (v land 0xffff);
+    set16 s 1 (v lsr 16);
+    setf s ((if v = 0 then zf else 0) lor (if v > 0xffff then cf else 0))
   | _ -> ()                                           (* 未定義は NOP *)
 
 (* ---- 前置なしの命令 ---- *)

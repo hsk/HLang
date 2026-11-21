@@ -33,6 +33,8 @@ let () =
   if (not Sys.win32) && Sys.command ("which z80asm > " ^ Filename.null ^ " 2>&1") = 0 then begin
     let src = Filename.temp_file "hl" ".asm" and out = Filename.temp_file "hl" ".bin" in
     let bad = ref 0 in
+    (* z80asm は R800 の命令（mulub、muluw）を知らないので、それは比べない *)
+    let lines = List.filter (function Asm.Ins (("mulub" | "muluw"), _), _ -> false | _ -> true) lines in
     List.iter
       (fun (line, want) ->
         let oc = open_out src in
